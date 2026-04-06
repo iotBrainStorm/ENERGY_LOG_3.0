@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -11,205 +11,383 @@
   </head>
 
   <body>
-    <div class="particles"></div>
-
     <div class="container">
       <!-- Header -->
       <div class="header">
-        <h1 class="title">⚡ ESP ENERGY MONITOR ⚡</h1>
-        <div class="subtitle">
-          <span class="status-dot"></span>
-          <span id="status-text">LIVE MONITORING</span>
-        </div>
-        <!-- Output Status Display -->
-        <div class="output-status off" id="output-status">
-          <span class="output-status-dot"></span>
-          <span id="output-status-text">OUTPUT: OFF</span>
+        <div class="header-top">
+          <div class="header-left"></div>
+          <div class="brand">
+            <div class="brand-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+            <div class="brand-text">
+              <h1 class="title">Energy Monitor</h1>
+              <p class="subtitle">Real-time Power Analytics</p>
+            </div>
+          </div>
+          <div class="header-right">
+            <span
+              class="status-dot-simple"
+              id="esp-status-dot"
+              title="ESP Online"
+            ></span>
+            <button
+              class="icon-btn power-btn"
+              id="power-toggle"
+              onclick="showPowerConfirm()"
+              title="Main Output"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+              >
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
+            </button>
+            <button
+              class="icon-btn settings-btn"
+              onclick="window.location.href = '/config.html'"
+              title="Settings"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Data Display Section -->
       <div class="data-grid">
-        <!-- Voltage Card -->
+        <!-- Voltage Card - with chart -->
         <div
-          class="data-card voltage-card"
+          class="data-card voltage-card has-chart"
           onclick="openDetailView('voltage', 'Voltage', 'V', '⚡')"
         >
-          <div class="card-label">
-            <span class="icon">⚡</span>
-            <span>VOLTAGE</span>
+          <div class="card-header">
+            <div class="card-icon voltage-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Voltage</span>
+              <div class="card-value-row">
+                <span class="card-value volt-value" id="voltage">0.0</span>
+                <span class="card-unit">V</span>
+              </div>
+            </div>
+            <div class="mini-chart-btn" title="View Chart">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
+              </svg>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="volt-value" id="voltage">0.0</span>
-            <span class="unit">V</span>
-          </div>
-          <div class="card-bar voltage-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill voltage-fill"></div>
           </div>
         </div>
 
-        <!-- Current Card -->
+        <!-- Current Card - with chart -->
         <div
-          class="data-card current-card"
+          class="data-card current-card has-chart"
           onclick="openDetailView('current', 'Current', 'A', '🔌')"
         >
-          <div class="card-label">
-            <span class="icon">🔌</span>
-            <span>CURRENT</span>
+          <div class="card-header">
+            <div class="card-icon current-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Current</span>
+              <div class="card-value-row">
+                <span class="card-value amp-value" id="current">0.00</span>
+                <span class="card-unit">A</span>
+              </div>
+            </div>
+            <div class="mini-chart-btn" title="View Chart">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
+              </svg>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="amp-value" id="current">0.00</span>
-            <span class="unit">A</span>
-          </div>
-          <div class="card-bar current-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill current-fill"></div>
           </div>
         </div>
 
-        <!-- Power Card -->
+        <!-- Power Card - with chart -->
         <div
-          class="data-card power-card"
+          class="data-card power-card has-chart"
           onclick="openDetailView('power', 'Power', 'W', '💡')"
         >
-          <div class="card-label">
-            <span class="icon">💡</span>
-            <span>POWER</span>
+          <div class="card-header">
+            <div class="card-icon power-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Power</span>
+              <div class="card-value-row">
+                <span class="card-value watt-value" id="power">0.0</span>
+                <span class="card-unit">W</span>
+              </div>
+            </div>
+            <div class="mini-chart-btn" title="View Chart">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22,12 18,12 15,21 9,3 6,12 2,12" />
+              </svg>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="watt-value" id="power">0.0</span>
-            <span class="unit">W</span>
-          </div>
-          <div class="card-bar power-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill power-fill"></div>
           </div>
         </div>
 
         <!-- Energy Card -->
-        <div
-          class="data-card energy-card"
-          onclick="openDetailView('energy', 'Energy', 'kWh', '🔋')"
-        >
-          <div class="card-label">
-            <span class="icon">🔋</span>
-            <span>ENERGY</span>
+        <div class="data-card energy-card">
+          <div class="card-header">
+            <div class="card-icon energy-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="1" y="6" width="22" height="12" rx="2" ry="2" />
+                <line x1="23" y1="10" x2="23" y2="14" />
+                <rect x="4" y="9" width="4" height="6" fill="currentColor" />
+                <rect x="10" y="9" width="4" height="6" fill="currentColor" />
+                <rect
+                  x="16"
+                  y="9"
+                  width="4"
+                  height="6"
+                  fill="currentColor"
+                  opacity="0.4"
+                />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Energy</span>
+              <div class="card-value-row">
+                <span class="card-value kwh-value" id="energy">0.00</span>
+                <span class="card-unit">kWh</span>
+              </div>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="kwh-value" id="energy">0.00</span>
-            <span class="unit">kWh</span>
-          </div>
-          <div class="card-bar energy-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill energy-fill"></div>
           </div>
         </div>
 
         <!-- Power Factor Card -->
-        <div
-          class="data-card pf-card"
-          onclick="openDetailView('pf', 'Power Factor', 'PF', '📊')"
-        >
-          <div class="card-label">
-            <span class="icon">📊</span>
-            <span>POWER FACTOR</span>
+        <div class="data-card pf-card">
+          <div class="card-header">
+            <div class="card-icon pf-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 20V10" />
+                <path d="M18 20V4" />
+                <path d="M6 20v-4" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Power Factor</span>
+              <div class="card-value-row">
+                <span class="card-value pf-value" id="pf">0.00</span>
+                <span class="card-unit">PF</span>
+              </div>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="pf-value" id="pf">0.00</span>
-            <span class="unit">PF</span>
-          </div>
-          <div class="card-bar pf-bar">
-            <div class="card-bar-fill"></div>
-          </div>
+          <div class="card-bar"><div class="card-bar-fill pf-fill"></div></div>
         </div>
 
         <!-- Frequency Card -->
-        <div
-          class="data-card frequency-card"
-          onclick="openDetailView('frequency', 'Frequency', 'Hz', '〰️')"
-        >
-          <div class="card-label">
-            <span class="icon">〰️</span>
-            <span>FREQUENCY</span>
+        <div class="data-card frequency-card">
+          <div class="card-header">
+            <div class="card-icon freq-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Frequency</span>
+              <div class="card-value-row">
+                <span class="card-value hz-value" id="frequency">0.00</span>
+                <span class="card-unit">Hz</span>
+              </div>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="hz-value" id="frequency">0.00</span>
-            <span class="unit">Hz</span>
-          </div>
-          <div class="card-bar frequency-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill frequency-fill"></div>
           </div>
         </div>
 
         <!-- Runtime Card -->
-        <div
-          class="data-card days-card"
-          onclick="openDetailView('days', 'Runtime', 'Days', '📅')"
-        >
-          <div class="card-label">
-            <span class="icon">📅</span>
-            <span>RUNTIME</span>
+        <div class="data-card days-card">
+          <div class="card-header">
+            <div class="card-icon days-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Runtime</span>
+              <div class="card-value-row">
+                <span class="card-value days-value" id="totalDays">0.0</span>
+                <span class="card-unit">Days</span>
+              </div>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="days-value" id="totalDays">0.0</span>
-            <span class="unit">Days</span>
-          </div>
-          <div class="card-bar days-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill days-fill"></div>
           </div>
         </div>
 
         <!-- Uptime Card -->
-        <div
-          class="data-card uptime-card"
-          onclick="openDetailView('uptime', 'Uptime', 'Hrs', '⏱️')"
-        >
-          <div class="card-label">
-            <span class="icon">⏱️</span>
-            <span>UPTIME</span>
+        <div class="data-card uptime-card">
+          <div class="card-header">
+            <div class="card-icon uptime-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+            <div class="card-info">
+              <span class="card-label">Uptime</span>
+              <div class="card-value-row">
+                <span class="card-value hr-value" id="uptime">0.0</span>
+                <span class="card-unit">Hrs</span>
+              </div>
+            </div>
           </div>
-          <div class="card-value">
-            <span class="hr-value" id="uptime">0.0</span>
-            <span class="unit">Hrs</span>
-          </div>
-          <div class="card-bar uptime-bar">
-            <div class="card-bar-fill"></div>
+          <div class="card-bar">
+            <div class="card-bar-fill uptime-fill"></div>
           </div>
         </div>
-      </div>
-
-      <!-- Control Buttons -->
-      <div class="firebase-setup-container">
-        <button class="btn-firebase-setup" onclick="goToFirebaseSetup()">
-          🔥 FIREBASE SETUP
-        </button>
-        <button class="btn-output-control" onclick="showOutputDialog()">
-          🔌 MAIN OUTPUT CONTROL
-        </button>
       </div>
 
       <!-- Footer -->
       <div class="footer">
-        <div>
-          ESP32 Real-time Energy Monitor Dashboard | Developer © M.Maity
-        </div>
-        <div class="last-update">
-          Last Update: <span id="last-update"> --- </span>
-        </div>
+        <div class="footer-datetime" id="footer-datetime"></div>
+        <div class="footer-divider">|</div>
+        <div class="footer-credit">ESP32 Energy Monitor &copy; M.Maity</div>
       </div>
     </div>
 
-    <!-- Output Control Dialog -->
-    <div class="output-dialog" id="output-dialog">
-      <div class="output-content">
-        <h3>🔌 Main Output Control</h3>
-        <p>Control the main power output relay.</p>
-        <p style="color: #00d4ff; font-weight: 700">
-          Current Status: <span id="current-output-status">--</span>
+    <!-- Power Confirmation Modal -->
+    <div class="confirm-modal" id="power-confirm-modal">
+      <div class="confirm-content">
+        <div class="confirm-icon" id="confirm-icon">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+          </svg>
+        </div>
+        <h3 class="confirm-title" id="confirm-title">Turn ON Main Output?</h3>
+        <p class="confirm-desc" id="confirm-desc">
+          This will enable the main power relay.
         </p>
-        <div class="output-buttons">
-          <button class="btn-output-off" onclick="setOutput(false)">
-            TURN OFF
+        <div class="confirm-actions">
+          <button
+            class="confirm-btn confirm-btn-cancel"
+            onclick="closePowerConfirm()"
+          >
+            Cancel
           </button>
-          <button class="btn-output-on" onclick="setOutput(true)">
-            TURN ON
+          <button
+            class="confirm-btn confirm-btn-confirm"
+            id="confirm-action-btn"
+            onclick="confirmPowerAction()"
+          >
+            Confirm
           </button>
         </div>
       </div>
@@ -227,7 +405,17 @@
             <span id="detail-current-value">0.0</span>
             <span class="stat-unit" id="detail-unit">V</span>
           </div>
-          <button class="close-btn" onclick="closeDetailView()">✕</button>
+          <button class="close-btn" onclick="closeDetailView()">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
 
         <div class="detail-stats">
@@ -307,6 +495,7 @@
       let currentOutputState = false;
       let chartInstance = null;
       let currentMetric = null;
+      let espOnline = false;
       let dataHistory = {
         voltage: [],
         current: [],
@@ -318,26 +507,95 @@
         uptime: [],
         timestamps: [],
       };
-      let maxDataPoints = 1800; // 30 minutes at 1 second intervals
-      let currentTimeRange = 60; // Default 1 minute
-      let customYAxis = {}; // Store custom Y-axis settings per metric
+      let maxDataPoints = 1800;
+      let currentTimeRange = 60;
+      let customYAxis = {};
 
       function updateBar(selector, percentage) {
-        const bar = document.querySelector(selector + " .card-bar-fill");
+        const bar = document.querySelector(selector);
         if (bar) {
           bar.style.width = Math.min(Math.max(percentage, 0), 100) + "%";
         }
       }
 
-      function updateSensorValues() {
-        fetch("/sensor.json")
+      function updateEspStatus(online) {
+        espOnline = online;
+        const dot = document.getElementById("esp-status-dot");
+        if (online) {
+          dot.className = "status-dot-simple online";
+          dot.title = "ESP Online";
+        } else {
+          dot.className = "status-dot-simple offline";
+          dot.title = "ESP Offline";
+        }
+      }
+
+      function updatePowerButton(state) {
+        currentOutputState = state;
+        const btn = document.getElementById("power-toggle");
+        if (state) {
+          btn.classList.add("active");
+          btn.title = "Main Output: ON";
+        } else {
+          btn.classList.remove("active");
+          btn.title = "Main Output: OFF";
+        }
+      }
+
+      function showPowerConfirm() {
+        const modal = document.getElementById("power-confirm-modal");
+        const title = document.getElementById("confirm-title");
+        const desc = document.getElementById("confirm-desc");
+        const icon = document.getElementById("confirm-icon");
+        const btn = document.getElementById("confirm-action-btn");
+
+        if (currentOutputState) {
+          title.textContent = "Turn OFF Main Output?";
+          desc.textContent = "This will disable the main power relay.";
+          icon.className = "confirm-icon off";
+          btn.className = "confirm-btn confirm-btn-danger";
+          btn.textContent = "Turn OFF";
+        } else {
+          title.textContent = "Turn ON Main Output?";
+          desc.textContent = "This will enable the main power relay.";
+          icon.className = "confirm-icon on";
+          btn.className = "confirm-btn confirm-btn-confirm";
+          btn.textContent = "Turn ON";
+        }
+        modal.classList.add("show");
+      }
+
+      function closePowerConfirm() {
+        document.getElementById("power-confirm-modal").classList.remove("show");
+      }
+
+      function confirmPowerAction() {
+        closePowerConfirm();
+        const newState = !currentOutputState;
+        fetch("/output/set", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state: newState }),
+        })
           .then((response) => response.json())
           .then((data) => {
-            // Store timestamp
+            if (data.success) {
+              updatePowerButton(newState);
+            }
+          })
+          .catch((error) => console.error("Error:", error));
+      }
+
+      function updateSensorValues() {
+        fetch("/sensor.json")
+          .then((response) => {
+            updateEspStatus(true);
+            return response.json();
+          })
+          .then((data) => {
             const now = Date.now();
             dataHistory.timestamps.push(now);
 
-            // Update values and store in history
             const voltage = parseFloat(data.voltage || 0);
             const current = parseFloat(data.current || 0);
             const power = parseFloat(data.power || 0);
@@ -357,7 +615,6 @@
             document.getElementById("totalDays").textContent = days.toFixed(1);
             document.getElementById("uptime").textContent = uptime.toFixed(1);
 
-            // Store in history
             dataHistory.voltage.push(voltage);
             dataHistory.current.push(current);
             dataHistory.power.push(power);
@@ -367,33 +624,29 @@
             dataHistory.days.push(days);
             dataHistory.uptime.push(uptime);
 
-            // Trim history to max data points
             if (dataHistory.timestamps.length > maxDataPoints) {
-              Object.keys(dataHistory).forEach((key) => {
-                dataHistory[key].shift();
-              });
+              Object.keys(dataHistory).forEach((key) =>
+                dataHistory[key].shift(),
+              );
             }
 
-            // Update output status
             if (data.mainOutput !== undefined) {
-              currentOutputState =
-                data.mainOutput === 1 || data.mainOutput === true;
-              updateOutputStatus(currentOutputState);
+              updatePowerButton(
+                data.mainOutput === 1 || data.mainOutput === true,
+              );
             }
 
-            // Update progress bars
-            updateBar(".voltage-bar", (voltage / 300) * 100);
-            updateBar(".current-bar", (current / 30) * 100);
-            updateBar(".power-bar", (power / 5000) * 100);
-            updateBar(".energy-bar", (energy / 500) * 100);
-            updateBar(".frequency-bar", ((frequency - 48) / 4) * 100);
-            updateBar(".pf-bar", pf * 100);
-            updateBar(".days-bar", (days / 90) * 100);
-            updateBar(".uptime-bar", (uptime / 24) * 100);
+            updateBar(".voltage-fill", (voltage / 300) * 100);
+            updateBar(".current-fill", (current / 30) * 100);
+            updateBar(".power-fill", (power / 5000) * 100);
+            updateBar(".energy-fill", (energy / 500) * 100);
+            updateBar(".frequency-fill", ((frequency - 48) / 4) * 100);
+            updateBar(".pf-fill", pf * 100);
+            updateBar(".days-fill", (days / 90) * 100);
+            updateBar(".uptime-fill", (uptime / 24) * 100);
 
             updateTimestamp();
 
-            // Update chart if detail view is open
             if (
               currentMetric &&
               document.getElementById("detail-modal").classList.contains("show")
@@ -401,95 +654,30 @@
               updateDetailChart();
             }
           })
-          .catch((error) => console.error("Error:", error));
+          .catch((error) => {
+            console.error("Error:", error);
+            updateEspStatus(false);
+          });
       }
 
       function updateTimestamp() {
         const now = new Date();
-        const timeStr = now.toLocaleString("en-IN", {
-          day: "2-digit",
-          month: "2-digit",
+        const options = {
+          weekday: "short",
           year: "numeric",
+          month: "short",
+          day: "numeric",
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
-          hour12: false,
-        });
-        document.getElementById("last-update").textContent = timeStr;
+          hour12: true,
+        };
+        const dateTimeStr = now.toLocaleString("en-IN", options);
+        document.getElementById("footer-datetime").textContent = dateTimeStr;
       }
 
-      function updateOutputStatus(state) {
-        const statusElement = document.getElementById("output-status");
-        const statusText = document.getElementById("output-status-text");
-
-        if (state) {
-          statusElement.className = "output-status on";
-          statusText.textContent = "OUTPUT: ON";
-        } else {
-          statusElement.className = "output-status off";
-          statusText.textContent = "OUTPUT: OFF";
-        }
-      }
-
-      function showOutputDialog() {
-        const dialog = document.getElementById("output-dialog");
-        const currentStatus = document.getElementById("current-output-status");
-        currentStatus.textContent = currentOutputState ? "ON" : "OFF";
-        dialog.classList.add("show");
-      }
-
-      function closeOutputDialog() {
-        document.getElementById("output-dialog").classList.remove("show");
-      }
-
-      function setOutput(state) {
-        fetch("/output/set", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ state: state }),
-        })
-          .then((response) => response.json())
-          .then((data) => {
-            if (data.success) {
-              currentOutputState = state;
-              updateOutputStatus(state);
-              closeOutputDialog();
-              // Update immediately
-              updateSensorValues();
-            } else {
-              alert("Failed to control output!");
-            }
-          })
-          .catch((error) => {
-            console.error("Error:", error);
-            alert("Error controlling output!");
-          });
-      }
-
-      function createParticles() {
-        const container = document.querySelector(".particles");
-        if (!container) return;
-
-        for (let i = 0; i < 50; i++) {
-          const particle = document.createElement("div");
-          particle.className = "particle";
-          particle.style.left = Math.random() * 100 + "%";
-          particle.style.animationDelay = Math.random() * 5 + "s";
-          particle.style.animationDuration = Math.random() * 3 + 5 + "s";
-          container.appendChild(particle);
-        }
-      }
-
-      function goToFirebaseSetup() {
-        window.location.href = "/firebase";
-      }
-
-      // Detail View Functions
       function openDetailView(metric, name, unit, icon) {
         currentMetric = metric;
-
         document.getElementById("detail-icon").textContent = icon;
         document.getElementById("detail-name").textContent = name;
         document.getElementById("detail-unit").textContent = unit;
@@ -497,7 +685,6 @@
         document.getElementById("detail-unit-min").textContent = unit;
         document.getElementById("detail-unit-max").textContent = unit;
 
-        // Load saved custom axis values if they exist
         if (customYAxis[metric]) {
           document.getElementById("y-min").value =
             customYAxis[metric].min !== undefined
@@ -514,7 +701,6 @@
 
         updateDetailStats();
         createChart();
-
         document.getElementById("detail-modal").classList.add("show");
       }
 
@@ -529,13 +715,11 @@
 
       function updateDetailStats() {
         if (!currentMetric || dataHistory[currentMetric].length === 0) return;
-
         const data = dataHistory[currentMetric];
         const current = data[data.length - 1];
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
         const min = Math.min(...data);
         const max = Math.max(...data);
-
         const decimals =
           currentMetric === "current" ||
           currentMetric === "pf" ||
@@ -556,50 +740,47 @@
 
       function createChart() {
         const ctx = document.getElementById("detail-chart").getContext("2d");
-
-        if (chartInstance) {
-          chartInstance.destroy();
-        }
+        if (chartInstance) chartInstance.destroy();
 
         const gradientColors = {
           voltage: {
-            start: "rgba(255, 206, 0, 0.5)",
-            end: "rgba(255, 206, 0, 0.05)",
+            start: "rgba(255, 206, 0, 0.4)",
+            end: "rgba(255, 206, 0, 0.02)",
             border: "#ffce00",
           },
           current: {
-            start: "rgba(0, 212, 255, 0.5)",
-            end: "rgba(0, 212, 255, 0.05)",
+            start: "rgba(0, 212, 255, 0.4)",
+            end: "rgba(0, 212, 255, 0.02)",
             border: "#00d4ff",
           },
           power: {
-            start: "rgba(255, 71, 87, 0.5)",
-            end: "rgba(255, 71, 87, 0.05)",
+            start: "rgba(255, 71, 87, 0.4)",
+            end: "rgba(255, 71, 87, 0.02)",
             border: "#ff4757",
           },
           energy: {
-            start: "rgba(123, 47, 247, 0.5)",
-            end: "rgba(123, 47, 247, 0.05)",
+            start: "rgba(123, 47, 247, 0.4)",
+            end: "rgba(123, 47, 247, 0.02)",
             border: "#7b2ff7",
           },
           pf: {
-            start: "rgba(0, 255, 127, 0.5)",
-            end: "rgba(0, 255, 127, 0.05)",
+            start: "rgba(0, 255, 127, 0.4)",
+            end: "rgba(0, 255, 127, 0.02)",
             border: "#00ff7f",
           },
           frequency: {
-            start: "rgba(255, 0, 188, 0.5)",
-            end: "rgba(255, 0, 188, 0.05)",
+            start: "rgba(255, 0, 188, 0.4)",
+            end: "rgba(255, 0, 188, 0.02)",
             border: "#ff00bc",
           },
           days: {
-            start: "rgba(89, 255, 0, 0.5)",
-            end: "rgba(89, 255, 0, 0.05)",
+            start: "rgba(89, 255, 0, 0.4)",
+            end: "rgba(89, 255, 0, 0.02)",
             border: "#59ff00",
           },
           uptime: {
-            start: "rgba(255, 159, 64, 0.5)",
-            end: "rgba(255, 159, 64, 0.05)",
+            start: "rgba(255, 159, 64, 0.4)",
+            end: "rgba(255, 159, 64, 0.02)",
             border: "#ff9f40",
           },
         };
@@ -610,8 +791,6 @@
         gradient.addColorStop(1, colors.end);
 
         const filteredData = getFilteredData();
-
-        // Set Y-axis range - use custom if set, otherwise use defaults
         const yAxisConfig = {
           voltage: { min: 0, max: 300 },
           current: { min: 0, max: 30 },
@@ -624,8 +803,6 @@
         };
 
         let yAxis = yAxisConfig[currentMetric] || { min: 0, max: undefined };
-
-        // Override with custom values if set
         if (customYAxis[currentMetric]) {
           yAxis = {
             min:
@@ -653,7 +830,7 @@
                 fill: true,
                 tension: 0.4,
                 pointRadius: 0,
-                pointHoverRadius: 6,
+                pointHoverRadius: 5,
                 pointHoverBackgroundColor: colors.border,
                 pointHoverBorderColor: "#fff",
                 pointHoverBorderWidth: 2,
@@ -663,175 +840,119 @@
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-              intersect: false,
-              mode: "index",
-            },
+            interaction: { intersect: false, mode: "index" },
             plugins: {
-              legend: {
-                display: false,
-              },
+              legend: { display: false },
               tooltip: {
-                backgroundColor: "rgba(10, 1, 24, 0.9)",
-                titleColor: "#00d4ff",
+                backgroundColor: "rgba(15, 23, 42, 0.95)",
+                titleColor: "#94a3b8",
                 bodyColor: "#fff",
                 borderColor: colors.border,
                 borderWidth: 1,
                 padding: 12,
                 displayColors: false,
                 callbacks: {
-                  title: function (context) {
-                    return context[0].label;
-                  },
-                  label: function (context) {
-                    return (
-                      context.parsed.y.toFixed(2) +
-                      " " +
-                      document.getElementById("detail-unit").textContent
-                    );
-                  },
+                  title: (context) => context[0].label,
+                  label: (context) =>
+                    context.parsed.y.toFixed(2) +
+                    " " +
+                    document.getElementById("detail-unit").textContent,
                 },
               },
             },
             scales: {
               x: {
-                grid: {
-                  color: "rgba(255, 255, 255, 0.05)",
-                  drawBorder: false,
-                },
+                grid: { color: "rgba(148, 163, 184, 0.1)", drawBorder: false },
                 ticks: {
-                  color: "#7b2ff7",
-                  maxTicksLimit: 8,
-                  font: {
-                    family: "Rajdhani",
-                    size: 12,
-                  },
+                  color: "#64748b",
+                  maxTicksLimit: 6,
+                  font: { family: "Inter", size: 11 },
                 },
               },
               y: {
                 min: yAxis.min,
                 max: yAxis.max,
-                grid: {
-                  color: "rgba(255, 255, 255, 0.05)",
-                  drawBorder: false,
-                },
+                grid: { color: "rgba(148, 163, 184, 0.1)", drawBorder: false },
                 ticks: {
-                  color: "#00d4ff",
-                  font: {
-                    family: "Rajdhani",
-                    size: 12,
-                  },
-                  callback: function (value) {
-                    return value.toFixed(1);
-                  },
+                  color: "#64748b",
+                  font: { family: "Inter", size: 11 },
+                  callback: (value) => value.toFixed(1),
                 },
               },
             },
-            animation: {
-              duration: 750,
-              easing: "easeInOutQuart",
-            },
+            animation: { duration: 500, easing: "easeOutQuart" },
           },
         });
       }
 
       function getFilteredData() {
-        if (!currentMetric || dataHistory[currentMetric].length === 0) {
+        if (!currentMetric || dataHistory[currentMetric].length === 0)
           return { labels: [], values: [] };
-        }
-
         const now = Date.now();
-        const timeRangeMs = currentTimeRange * 1000;
-        const cutoffTime = now - timeRangeMs;
-
-        const labels = [];
-        const values = [];
+        const cutoffTime = now - currentTimeRange * 1000;
+        const labels = [],
+          values = [];
 
         for (let i = 0; i < dataHistory.timestamps.length; i++) {
           if (dataHistory.timestamps[i] >= cutoffTime) {
-            const date = new Date(dataHistory.timestamps[i]);
             labels.push(
-              date.toLocaleTimeString("en-US", {
+              new Date(dataHistory.timestamps[i]).toLocaleTimeString("en-US", {
                 hour: "2-digit",
                 minute: "2-digit",
                 second: "2-digit",
                 hour12: false,
-              })
+              }),
             );
             values.push(dataHistory[currentMetric][i]);
           }
         }
-
         return { labels, values };
       }
 
       function updateDetailChart() {
         if (!chartInstance || !currentMetric) return;
-
         const filteredData = getFilteredData();
         chartInstance.data.labels = filteredData.labels;
         chartInstance.data.datasets[0].data = filteredData.values;
-        chartInstance.update("none"); // Update without animation for smooth real-time updates
-
+        chartInstance.update("none");
         updateDetailStats();
       }
 
       function changeTimeRange(seconds) {
         currentTimeRange = seconds;
-
-        // Update button states
-        document.querySelectorAll(".time-btn").forEach((btn) => {
-          btn.classList.remove("active");
-        });
+        document
+          .querySelectorAll(".time-btn")
+          .forEach((btn) => btn.classList.remove("active"));
         event.target.classList.add("active");
-
-        if (chartInstance) {
-          updateDetailChart();
-        }
+        if (chartInstance) updateDetailChart();
       }
 
       function applyAxisRange() {
         if (!currentMetric) return;
-
         const minVal = document.getElementById("y-min").value;
         const maxVal = document.getElementById("y-max").value;
-
         customYAxis[currentMetric] = {
           min: minVal !== "" ? parseFloat(minVal) : undefined,
           max: maxVal !== "" ? parseFloat(maxVal) : undefined,
         };
-
-        // Recreate chart with new axis settings
         createChart();
       }
 
       function resetAxisRange() {
         if (!currentMetric) return;
-
-        // Remove custom settings
         delete customYAxis[currentMetric];
-
-        // Clear input fields
         document.getElementById("y-min").value = "";
         document.getElementById("y-max").value = "";
-
-        // Recreate chart with default axis settings
         createChart();
       }
 
-      // Close dialog on ESC key
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          closeOutputDialog();
-          closeDetailView();
-        }
+        if (e.key === "Escape") closeDetailView();
       });
 
-      // Initialize on page load
       document.addEventListener("DOMContentLoaded", () => {
-        createParticles();
         updateSensorValues();
-        setInterval(updateSensorValues, 1000); // Update every second
+        setInterval(updateSensorValues, 1000);
       });
     </script>
   </body>
