@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Energy Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="plug_icon.svg" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  </head>
+
+  <body>
+    <div class="particles"></div>
+
+    <div class="container">
+      <!-- Header -->
+      <div class="header">
+        <h1 class="title">⚡ ESP ENERGY MONITOR ⚡</h1>
+        <div class="subtitle">
+          <span class="status-dot"></span>
+          <span id="status-text">LIVE MONITORING</span>
+        </div>
+        <!-- Output Status Display -->
+        <div class="output-status off" id="output-status">
+          <span class="output-status-dot"></span>
+          <span id="output-status-text">OUTPUT: OFF</span>
+        </div>
+      </div>
+
+      <!-- Data Display Section -->
+      <div class="data-grid">
+        <!-- Voltage Card -->
+        <div
+          class="data-card voltage-card"
+          onclick="openDetailView('voltage', 'Voltage', 'V', '⚡')"
+        >
+          <div class="card-label">
+            <span class="icon">⚡</span>
+            <span>VOLTAGE</span>
+          </div>
+          <div class="card-value">
+            <span class="volt-value" id="voltage">0.0</span>
+            <span class="unit">V</span>
+          </div>
+          <div class="card-bar voltage-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Current Card -->
+        <div
+          class="data-card current-card"
+          onclick="openDetailView('current', 'Current', 'A', '🔌')"
+        >
+          <div class="card-label">
+            <span class="icon">🔌</span>
+            <span>CURRENT</span>
+          </div>
+          <div class="card-value">
+            <span class="amp-value" id="current">0.00</span>
+            <span class="unit">A</span>
+          </div>
+          <div class="card-bar current-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Power Card -->
+        <div
+          class="data-card power-card"
+          onclick="openDetailView('power', 'Power', 'W', '💡')"
+        >
+          <div class="card-label">
+            <span class="icon">💡</span>
+            <span>POWER</span>
+          </div>
+          <div class="card-value">
+            <span class="watt-value" id="power">0.0</span>
+            <span class="unit">W</span>
+          </div>
+          <div class="card-bar power-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Energy Card -->
+        <div
+          class="data-card energy-card"
+          onclick="openDetailView('energy', 'Energy', 'kWh', '🔋')"
+        >
+          <div class="card-label">
+            <span class="icon">🔋</span>
+            <span>ENERGY</span>
+          </div>
+          <div class="card-value">
+            <span class="kwh-value" id="energy">0.00</span>
+            <span class="unit">kWh</span>
+          </div>
+          <div class="card-bar energy-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Power Factor Card -->
+        <div
+          class="data-card pf-card"
+          onclick="openDetailView('pf', 'Power Factor', 'PF', '📊')"
+        >
+          <div class="card-label">
+            <span class="icon">📊</span>
+            <span>POWER FACTOR</span>
+          </div>
+          <div class="card-value">
+            <span class="pf-value" id="pf">0.00</span>
+            <span class="unit">PF</span>
+          </div>
+          <div class="card-bar pf-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Frequency Card -->
+        <div
+          class="data-card frequency-card"
+          onclick="openDetailView('frequency', 'Frequency', 'Hz', '〰️')"
+        >
+          <div class="card-label">
+            <span class="icon">〰️</span>
+            <span>FREQUENCY</span>
+          </div>
+          <div class="card-value">
+            <span class="hz-value" id="frequency">0.00</span>
+            <span class="unit">Hz</span>
+          </div>
+          <div class="card-bar frequency-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Runtime Card -->
+        <div
+          class="data-card days-card"
+          onclick="openDetailView('days', 'Runtime', 'Days', '📅')"
+        >
+          <div class="card-label">
+            <span class="icon">📅</span>
+            <span>RUNTIME</span>
+          </div>
+          <div class="card-value">
+            <span class="days-value" id="totalDays">0.0</span>
+            <span class="unit">Days</span>
+          </div>
+          <div class="card-bar days-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Uptime Card -->
+        <div
+          class="data-card uptime-card"
+          onclick="openDetailView('uptime', 'Uptime', 'Hrs', '⏱️')"
+        >
+          <div class="card-label">
+            <span class="icon">⏱️</span>
+            <span>UPTIME</span>
+          </div>
+          <div class="card-value">
+            <span class="hr-value" id="uptime">0.0</span>
+            <span class="unit">Hrs</span>
+          </div>
+          <div class="card-bar uptime-bar">
+            <div class="card-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Control Buttons -->
+      <div class="firebase-setup-container">
+        <button class="btn-firebase-setup" onclick="goToFirebaseSetup()">
+          🔥 FIREBASE SETUP
+        </button>
+        <button class="btn-output-control" onclick="showOutputDialog()">
+          🔌 MAIN OUTPUT CONTROL
+        </button>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <div>
+          ESP32 Real-time Energy Monitor Dashboard | Developer © M.Maity
+        </div>
+        <div class="last-update">
+          Last Update: <span id="last-update"> --- </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output Control Dialog -->
+    <div class="output-dialog" id="output-dialog">
+      <div class="output-content">
+        <h3>🔌 Main Output Control</h3>
+        <p>Control the main power output relay.</p>
+        <p style="color: #00d4ff; font-weight: 700">
+          Current Status: <span id="current-output-status">--</span>
+        </p>
+        <div class="output-buttons">
+          <button class="btn-output-off" onclick="setOutput(false)">
+            TURN OFF
+          </button>
+          <button class="btn-output-on" onclick="setOutput(true)">
+            TURN ON
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail View Modal -->
+    <div class="detail-modal" id="detail-modal">
+      <div class="detail-content">
+        <div class="detail-header">
+          <div class="detail-title">
+            <span class="detail-icon" id="detail-icon">⚡</span>
+            <h2 id="detail-name">Voltage</h2>
+          </div>
+          <div class="stat-value">
+            <span id="detail-current-value">0.0</span>
+            <span class="stat-unit" id="detail-unit">V</span>
+          </div>
+          <button class="close-btn" onclick="closeDetailView()">✕</button>
+        </div>
+
+        <div class="detail-stats">
+          <div class="stat-box">
+            <div class="stat-label">AVERAGE</div>
+            <div class="stat-value">
+              <span id="detail-avg-value">0.0</span>
+              <span class="stat-unit" id="detail-unit-avg">V</span>
+            </div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">MIN</div>
+            <div class="stat-value">
+              <span id="detail-min-value">0.0</span>
+              <span class="stat-unit" id="detail-unit-min">V</span>
+            </div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">MAX</div>
+            <div class="stat-value">
+              <span id="detail-max-value">0.0</span>
+              <span class="stat-unit" id="detail-unit-max">V</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="detail-chart"></canvas>
+        </div>
+
+        <div class="time-controls">
+          <button class="time-btn active" onclick="changeTimeRange(60)">
+            1 Min
+          </button>
+          <button class="time-btn" onclick="changeTimeRange(300)">5 Min</button>
+          <button class="time-btn" onclick="changeTimeRange(600)">
+            10 Min
+          </button>
+          <button class="time-btn" onclick="changeTimeRange(1800)">
+            30 Min
+          </button>
+        </div>
+
+        <div class="axis-controls">
+          <div class="axis-control-title">Y-Axis Range</div>
+          <div class="axis-inputs">
+            <div class="axis-input-group">
+              <label for="y-min">Min:</label>
+              <input
+                type="number"
+                id="y-min"
+                class="axis-input"
+                step="any"
+                placeholder="Auto"
+              />
+            </div>
+            <div class="axis-input-group">
+              <label for="y-max">Max:</label>
+              <input
+                type="number"
+                id="y-max"
+                class="axis-input"
+                step="any"
+                placeholder="Auto"
+              />
+            </div>
+            <button class="axis-btn" onclick="applyAxisRange()">Apply</button>
+            <button class="axis-btn-reset" onclick="resetAxisRange()">
+              Reset
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentOutputState = false;
+      let chartInstance = null;
+      let currentMetric = null;
+      let dataHistory = {
+        voltage: [],
+        current: [],
+        power: [],
+        energy: [],
+        pf: [],
+        frequency: [],
+        days: [],
+        uptime: [],
+        timestamps: [],
+      };
+      let maxDataPoints = 1800; // 30 minutes at 1 second intervals
+      let currentTimeRange = 60; // Default 1 minute
+      let customYAxis = {}; // Store custom Y-axis settings per metric
+
+      function updateBar(selector, percentage) {
+        const bar = document.querySelector(selector + " .card-bar-fill");
+        if (bar) {
+          bar.style.width = Math.min(Math.max(percentage, 0), 100) + "%";
+        }
+      }
+
+      function updateSensorValues() {
+        fetch("/sensor.json")
+          .then((response) => response.json())
+          .then((data) => {
+            // Store timestamp
+            const now = Date.now();
+            dataHistory.timestamps.push(now);
+
+            // Update values and store in history
+            const voltage = parseFloat(data.voltage || 0);
+            const current = parseFloat(data.current || 0);
+            const power = parseFloat(data.power || 0);
+            const energy = parseFloat(data.energy || 0);
+            const pf = parseFloat(data.pf || 0);
+            const frequency = parseFloat(data.frequency || 0);
+            const days = parseFloat(data.days || 0);
+            const uptime = parseFloat(data.uptime || 0);
+
+            document.getElementById("voltage").textContent = voltage.toFixed(1);
+            document.getElementById("current").textContent = current.toFixed(2);
+            document.getElementById("power").textContent = power.toFixed(1);
+            document.getElementById("energy").textContent = energy.toFixed(2);
+            document.getElementById("pf").textContent = pf.toFixed(2);
+            document.getElementById("frequency").textContent =
+              frequency.toFixed(2);
+            document.getElementById("totalDays").textContent = days.toFixed(1);
+            document.getElementById("uptime").textContent = uptime.toFixed(1);
+
+            // Store in history
+            dataHistory.voltage.push(voltage);
+            dataHistory.current.push(current);
+            dataHistory.power.push(power);
+            dataHistory.energy.push(energy);
+            dataHistory.pf.push(pf);
+            dataHistory.frequency.push(frequency);
+            dataHistory.days.push(days);
+            dataHistory.uptime.push(uptime);
+
+            // Trim history to max data points
+            if (dataHistory.timestamps.length > maxDataPoints) {
+              Object.keys(dataHistory).forEach((key) => {
+                dataHistory[key].shift();
+              });
+            }
+
+            // Update output status
+            if (data.mainOutput !== undefined) {
+              currentOutputState =
+                data.mainOutput === 1 || data.mainOutput === true;
+              updateOutputStatus(currentOutputState);
+            }
+
+            // Update progress bars
+            updateBar(".voltage-bar", (voltage / 300) * 100);
+            updateBar(".current-bar", (current / 30) * 100);
+            updateBar(".power-bar", (power / 5000) * 100);
+            updateBar(".energy-bar", (energy / 500) * 100);
+            updateBar(".frequency-bar", ((frequency - 48) / 4) * 100);
+            updateBar(".pf-bar", pf * 100);
+            updateBar(".days-bar", (days / 90) * 100);
+            updateBar(".uptime-bar", (uptime / 24) * 100);
+
+            updateTimestamp();
+
+            // Update chart if detail view is open
+            if (
+              currentMetric &&
+              document.getElementById("detail-modal").classList.contains("show")
+            ) {
+              updateDetailChart();
+            }
+          })
+          .catch((error) => console.error("Error:", error));
+      }
+
+      function updateTimestamp() {
+        const now = new Date();
+        const timeStr = now.toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        });
+        document.getElementById("last-update").textContent = timeStr;
+      }
+
+      function updateOutputStatus(state) {
+        const statusElement = document.getElementById("output-status");
+        const statusText = document.getElementById("output-status-text");
+
+        if (state) {
+          statusElement.className = "output-status on";
+          statusText.textContent = "OUTPUT: ON";
+        } else {
+          statusElement.className = "output-status off";
+          statusText.textContent = "OUTPUT: OFF";
+        }
+      }
+
+      function showOutputDialog() {
+        const dialog = document.getElementById("output-dialog");
+        const currentStatus = document.getElementById("current-output-status");
+        currentStatus.textContent = currentOutputState ? "ON" : "OFF";
+        dialog.classList.add("show");
+      }
+
+      function closeOutputDialog() {
+        document.getElementById("output-dialog").classList.remove("show");
+      }
+
+      function setOutput(state) {
+        fetch("/output/set", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ state: state }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.success) {
+              currentOutputState = state;
+              updateOutputStatus(state);
+              closeOutputDialog();
+              // Update immediately
+              updateSensorValues();
+            } else {
+              alert("Failed to control output!");
+            }
+          })
+          .catch((error) => {
+            console.error("Error:", error);
+            alert("Error controlling output!");
+          });
+      }
+
+      function createParticles() {
+        const container = document.querySelector(".particles");
+        if (!container) return;
+
+        for (let i = 0; i < 50; i++) {
+          const particle = document.createElement("div");
+          particle.className = "particle";
+          particle.style.left = Math.random() * 100 + "%";
+          particle.style.animationDelay = Math.random() * 5 + "s";
+          particle.style.animationDuration = Math.random() * 3 + 5 + "s";
+          container.appendChild(particle);
+        }
+      }
+
+      function goToFirebaseSetup() {
+        window.location.href = "/firebase";
+      }
+
+      // Detail View Functions
+      function openDetailView(metric, name, unit, icon) {
+        currentMetric = metric;
+
+        document.getElementById("detail-icon").textContent = icon;
+        document.getElementById("detail-name").textContent = name;
+        document.getElementById("detail-unit").textContent = unit;
+        document.getElementById("detail-unit-avg").textContent = unit;
+        document.getElementById("detail-unit-min").textContent = unit;
+        document.getElementById("detail-unit-max").textContent = unit;
+
+        // Load saved custom axis values if they exist
+        if (customYAxis[metric]) {
+          document.getElementById("y-min").value =
+            customYAxis[metric].min !== undefined
+              ? customYAxis[metric].min
+              : "";
+          document.getElementById("y-max").value =
+            customYAxis[metric].max !== undefined
+              ? customYAxis[metric].max
+              : "";
+        } else {
+          document.getElementById("y-min").value = "";
+          document.getElementById("y-max").value = "";
+        }
+
+        updateDetailStats();
+        createChart();
+
+        document.getElementById("detail-modal").classList.add("show");
+      }
+
+      function closeDetailView() {
+        document.getElementById("detail-modal").classList.remove("show");
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        currentMetric = null;
+      }
+
+      function updateDetailStats() {
+        if (!currentMetric || dataHistory[currentMetric].length === 0) return;
+
+        const data = dataHistory[currentMetric];
+        const current = data[data.length - 1];
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+
+        const decimals =
+          currentMetric === "current" ||
+          currentMetric === "pf" ||
+          currentMetric === "frequency" ||
+          currentMetric === "energy"
+            ? 2
+            : 1;
+
+        document.getElementById("detail-current-value").textContent =
+          current.toFixed(decimals);
+        document.getElementById("detail-avg-value").textContent =
+          avg.toFixed(decimals);
+        document.getElementById("detail-min-value").textContent =
+          min.toFixed(decimals);
+        document.getElementById("detail-max-value").textContent =
+          max.toFixed(decimals);
+      }
+
+      function createChart() {
+        const ctx = document.getElementById("detail-chart").getContext("2d");
+
+        if (chartInstance) {
+          chartInstance.destroy();
+        }
+
+        const gradientColors = {
+          voltage: {
+            start: "rgba(255, 206, 0, 0.5)",
+            end: "rgba(255, 206, 0, 0.05)",
+            border: "#ffce00",
+          },
+          current: {
+            start: "rgba(0, 212, 255, 0.5)",
+            end: "rgba(0, 212, 255, 0.05)",
+            border: "#00d4ff",
+          },
+          power: {
+            start: "rgba(255, 71, 87, 0.5)",
+            end: "rgba(255, 71, 87, 0.05)",
+            border: "#ff4757",
+          },
+          energy: {
+            start: "rgba(123, 47, 247, 0.5)",
+            end: "rgba(123, 47, 247, 0.05)",
+            border: "#7b2ff7",
+          },
+          pf: {
+            start: "rgba(0, 255, 127, 0.5)",
+            end: "rgba(0, 255, 127, 0.05)",
+            border: "#00ff7f",
+          },
+          frequency: {
+            start: "rgba(255, 0, 188, 0.5)",
+            end: "rgba(255, 0, 188, 0.05)",
+            border: "#ff00bc",
+          },
+          days: {
+            start: "rgba(89, 255, 0, 0.5)",
+            end: "rgba(89, 255, 0, 0.05)",
+            border: "#59ff00",
+          },
+          uptime: {
+            start: "rgba(255, 159, 64, 0.5)",
+            end: "rgba(255, 159, 64, 0.05)",
+            border: "#ff9f40",
+          },
+        };
+
+        const colors = gradientColors[currentMetric] || gradientColors.voltage;
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, colors.start);
+        gradient.addColorStop(1, colors.end);
+
+        const filteredData = getFilteredData();
+
+        // Set Y-axis range - use custom if set, otherwise use defaults
+        const yAxisConfig = {
+          voltage: { min: 0, max: 300 },
+          current: { min: 0, max: 30 },
+          power: { min: 0, max: 5000 },
+          energy: { min: 0, max: undefined },
+          pf: { min: 0, max: 1 },
+          frequency: { min: 45, max: 55 },
+          days: { min: 0, max: undefined },
+          uptime: { min: 0, max: undefined },
+        };
+
+        let yAxis = yAxisConfig[currentMetric] || { min: 0, max: undefined };
+
+        // Override with custom values if set
+        if (customYAxis[currentMetric]) {
+          yAxis = {
+            min:
+              customYAxis[currentMetric].min !== undefined
+                ? customYAxis[currentMetric].min
+                : yAxis.min,
+            max:
+              customYAxis[currentMetric].max !== undefined
+                ? customYAxis[currentMetric].max
+                : yAxis.max,
+          };
+        }
+
+        chartInstance = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: filteredData.labels,
+            datasets: [
+              {
+                label: document.getElementById("detail-name").textContent,
+                data: filteredData.values,
+                borderColor: colors.border,
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointRadius: 0,
+                pointHoverRadius: 6,
+                pointHoverBackgroundColor: colors.border,
+                pointHoverBorderColor: "#fff",
+                pointHoverBorderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+              intersect: false,
+              mode: "index",
+            },
+            plugins: {
+              legend: {
+                display: false,
+              },
+              tooltip: {
+                backgroundColor: "rgba(10, 1, 24, 0.9)",
+                titleColor: "#00d4ff",
+                bodyColor: "#fff",
+                borderColor: colors.border,
+                borderWidth: 1,
+                padding: 12,
+                displayColors: false,
+                callbacks: {
+                  title: function (context) {
+                    return context[0].label;
+                  },
+                  label: function (context) {
+                    return (
+                      context.parsed.y.toFixed(2) +
+                      " " +
+                      document.getElementById("detail-unit").textContent
+                    );
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: {
+                  color: "rgba(255, 255, 255, 0.05)",
+                  drawBorder: false,
+                },
+                ticks: {
+                  color: "#7b2ff7",
+                  maxTicksLimit: 8,
+                  font: {
+                    family: "Rajdhani",
+                    size: 12,
+                  },
+                },
+              },
+              y: {
+                min: yAxis.min,
+                max: yAxis.max,
+                grid: {
+                  color: "rgba(255, 255, 255, 0.05)",
+                  drawBorder: false,
+                },
+                ticks: {
+                  color: "#00d4ff",
+                  font: {
+                    family: "Rajdhani",
+                    size: 12,
+                  },
+                  callback: function (value) {
+                    return value.toFixed(1);
+                  },
+                },
+              },
+            },
+            animation: {
+              duration: 750,
+              easing: "easeInOutQuart",
+            },
+          },
+        });
+      }
+
+      function getFilteredData() {
+        if (!currentMetric || dataHistory[currentMetric].length === 0) {
+          return { labels: [], values: [] };
+        }
+
+        const now = Date.now();
+        const timeRangeMs = currentTimeRange * 1000;
+        const cutoffTime = now - timeRangeMs;
+
+        const labels = [];
+        const values = [];
+
+        for (let i = 0; i < dataHistory.timestamps.length; i++) {
+          if (dataHistory.timestamps[i] >= cutoffTime) {
+            const date = new Date(dataHistory.timestamps[i]);
+            labels.push(
+              date.toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              })
+            );
+            values.push(dataHistory[currentMetric][i]);
+          }
+        }
+
+        return { labels, values };
+      }
+
+      function updateDetailChart() {
+        if (!chartInstance || !currentMetric) return;
+
+        const filteredData = getFilteredData();
+        chartInstance.data.labels = filteredData.labels;
+        chartInstance.data.datasets[0].data = filteredData.values;
+        chartInstance.update("none"); // Update without animation for smooth real-time updates
+
+        updateDetailStats();
+      }
+
+      function changeTimeRange(seconds) {
+        currentTimeRange = seconds;
+
+        // Update button states
+        document.querySelectorAll(".time-btn").forEach((btn) => {
+          btn.classList.remove("active");
+        });
+        event.target.classList.add("active");
+
+        if (chartInstance) {
+          updateDetailChart();
+        }
+      }
+
+      function applyAxisRange() {
+        if (!currentMetric) return;
+
+        const minVal = document.getElementById("y-min").value;
+        const maxVal = document.getElementById("y-max").value;
+
+        customYAxis[currentMetric] = {
+          min: minVal !== "" ? parseFloat(minVal) : undefined,
+          max: maxVal !== "" ? parseFloat(maxVal) : undefined,
+        };
+
+        // Recreate chart with new axis settings
+        createChart();
+      }
+
+      function resetAxisRange() {
+        if (!currentMetric) return;
+
+        // Remove custom settings
+        delete customYAxis[currentMetric];
+
+        // Clear input fields
+        document.getElementById("y-min").value = "";
+        document.getElementById("y-max").value = "";
+
+        // Recreate chart with default axis settings
+        createChart();
+      }
+
+      // Close dialog on ESC key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          closeOutputDialog();
+          closeDetailView();
+        }
+      });
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        createParticles();
+        updateSensorValues();
+        setInterval(updateSensorValues, 1000); // Update every second
+      });
+    </script>
+  </body>
+</html>
