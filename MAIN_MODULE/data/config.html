@@ -28,6 +28,7 @@
         box-sizing: border-box;
         margin: 0;
         padding: 0;
+        -webkit-tap-highlight-color: transparent;
       }
 
       body {
@@ -292,6 +293,17 @@
         background: white;
       }
 
+      .toggle input:focus + .toggle-slider {
+        outline: none;
+        box-shadow: none;
+      }
+
+      .toggle-slider:focus,
+      .toggle-slider:active {
+        outline: none;
+        box-shadow: none;
+      }
+
       /* Input Fields */
       .input-field {
         padding: 10px 14px;
@@ -515,6 +527,12 @@
         .sidebar {
           transform: translateX(-100%);
           transition: transform 0.3s ease;
+          top: 60px;
+          height: calc(100vh - 60px);
+        }
+
+        .sidebar-nav {
+          padding-bottom: 80px;
         }
 
         .sidebar.open {
@@ -539,6 +557,15 @@
         .setting-control {
           width: 100%;
           justify-content: flex-end;
+        }
+
+        .btn-group-section {
+          flex-direction: column;
+        }
+
+        .btn-group-section .btn {
+          width: 100%;
+          justify-content: center;
         }
       }
 
@@ -781,6 +808,13 @@
         font-size: 12px;
       }
 
+      /* Button group section */
+      .btn-group-section {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
       /* User list styles */
       .user-list {
         display: flex;
@@ -857,9 +891,9 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 42px;
-        height: 42px;
-        border-radius: 12px;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
         background: var(--bg-primary);
         border: 2px solid var(--border-color);
         color: var(--text-secondary);
@@ -887,7 +921,7 @@
 
       /* Schedule Modal Form */
       .schedule-form-group {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
       }
 
       .schedule-form-label {
@@ -902,13 +936,13 @@
 
       .schedule-time-input {
         width: 100%;
-        padding: 14px 16px;
+        padding: 12px 14px;
         background: var(--bg-primary);
         border: 2px solid var(--border-color);
         border-radius: 12px;
         color: var(--text-primary);
         font-family: inherit;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 500;
         text-align: center;
         outline: none;
@@ -971,6 +1005,7 @@
       .setting-control .input-field,
       .setting-control .btn {
         min-width: 140px;
+        justify-content: center;
       }
 
       .setting-control .input-small {
@@ -979,8 +1014,8 @@
       }
 
       .input-with-unit .input-small {
-        min-width: 80px;
-        width: 80px;
+        min-width: 120px;
+        width: 120px;
       }
 
       /* Select dropdown */
@@ -1157,6 +1192,118 @@
         display: flex;
         align-items: center;
         gap: 8px;
+      }
+
+      /* Login Modal */
+      .login-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        z-index: 5000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .login-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 40px 32px;
+        width: 90%;
+        max-width: 380px;
+        text-align: center;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      }
+
+      .login-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: linear-gradient(
+          135deg,
+          rgba(59, 130, 246, 0.2),
+          rgba(59, 130, 246, 0.1)
+        );
+        border: 2px solid rgba(59, 130, 246, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 20px;
+        color: var(--accent-blue);
+      }
+
+      .login-icon svg {
+        width: 32px;
+        height: 32px;
+      }
+
+      .login-title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      .login-desc {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-bottom: 24px;
+      }
+
+      .login-field {
+        width: 100%;
+        padding: 12px 16px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 14px;
+        outline: none;
+        transition: all 0.2s;
+        margin-bottom: 12px;
+      }
+
+      .login-field:focus {
+        border-color: var(--accent-blue);
+      }
+
+      .login-field::placeholder {
+        color: var(--text-muted);
+      }
+
+      .login-error {
+        font-size: 13px;
+        color: var(--danger-color);
+        margin-bottom: 12px;
+        display: none;
+      }
+
+      .login-btn {
+        width: 100%;
+        padding: 12px;
+        background: var(--accent-blue);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .login-btn:hover {
+        background: #2563eb;
+      }
+
+      .admin-verify-fields {
+        text-align: left;
+        margin-bottom: 16px;
       }
     </style>
   </head>
@@ -1402,7 +1549,7 @@
 
           <div class="nav-group">
             <div class="nav-group-title">Account</div>
-            <div class="nav-item" data-section="account">
+            <div class="nav-item" data-section="show-users">
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -1414,7 +1561,34 @@
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
                 <path d="M16 3.13a4 4 0 0 1 0 7.75" />
               </svg>
-              <span>Users</span>
+              <span>Show Users</span>
+            </div>
+            <div class="nav-item" data-section="add-user">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="8.5" cy="7" r="4" />
+                <line x1="20" y1="8" x2="20" y2="14" />
+                <line x1="23" y1="11" x2="17" y2="11" />
+              </svg>
+              <span>Add User</span>
+            </div>
+            <div class="nav-item" data-section="remove-user">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="8.5" cy="7" r="4" />
+                <line x1="23" y1="11" x2="17" y2="11" />
+              </svg>
+              <span>Remove User</span>
             </div>
           </div>
         </nav>
@@ -1682,7 +1856,7 @@
             </div>
           </div>
 
-          <div style="display: flex; gap: 12px; flex-wrap: wrap">
+          <div class="btn-group-section">
             <button class="btn btn-primary" onclick="saveFirebaseSettings()">
               Save Firebase Settings
             </button>
@@ -1757,6 +1931,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveOutputSettings()">
+            Save Output Settings
+          </button>
         </section>
 
         <!-- AFPC Section -->
@@ -1811,18 +1989,21 @@
                   <div class="setting-desc">Desired PF value (0.50 - 0.99)</div>
                 </div>
                 <div class="setting-control">
-                  <input
-                    type="number"
-                    class="input-field input-small"
-                    id="target-pf"
-                    value="0.90"
-                    min="0.50"
-                    max="0.99"
-                    step="0.01"
-                    onchange="
-                      saveSetting('targetFactor', parseFloat(this.value))
-                    "
-                  />
+                  <div class="input-with-unit">
+                    <input
+                      type="number"
+                      class="input-field input-small"
+                      id="target-pf"
+                      value="0.90"
+                      min="0.50"
+                      max="0.99"
+                      step="0.01"
+                      onchange="
+                        saveSetting('targetFactor', parseFloat(this.value))
+                      "
+                    />
+                    <span class="input-unit">PF</span>
+                  </div>
                 </div>
               </div>
               <div class="setting-row">
@@ -1850,6 +2031,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveAfpcSettings()">
+            Save AFPC Settings
+          </button>
         </section>
 
         <!-- Thresholds Section -->
@@ -2094,6 +2279,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveThresholdSettings()">
+            Save Thresholds
+          </button>
         </section>
 
         <!-- Safety Alerts Section -->
@@ -2231,6 +2420,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveAlertSettings()">
+            Save Alert Settings
+          </button>
         </section>
 
         <!-- Protection Section -->
@@ -2348,6 +2541,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveProtectionSettings()">
+            Save Protection Settings
+          </button>
         </section>
 
         <!-- Update Intervals Section -->
@@ -2481,6 +2678,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveIntervalSettings()">
+            Save Interval Settings
+          </button>
         </section>
 
         <!-- Startup Section -->
@@ -2518,6 +2719,10 @@
               </div>
             </div>
           </div>
+
+          <button class="btn btn-primary" onclick="saveStartupSettings()">
+            Save Startup Settings
+          </button>
         </section>
 
         <!-- Data Management Section -->
@@ -2649,22 +2854,46 @@
                     id="timezone-select"
                     onchange="saveTimezone(this.value)"
                   >
+                    <option value="-43200">BIT (UTC-12:00)</option>
+                    <option value="-39600">SST (UTC-11:00)</option>
+                    <option value="-36000">HST (UTC-10:00)</option>
+                    <option value="-34200">MART (UTC-9:30)</option>
+                    <option value="-32400">AKST (UTC-9:00)</option>
+                    <option value="-28800">PST (UTC-8:00)</option>
+                    <option value="-25200">MST (UTC-7:00)</option>
+                    <option value="-21600">CST (UTC-6:00)</option>
+                    <option value="-18000">EST (UTC-5:00)</option>
+                    <option value="-16200">VET (UTC-4:30)</option>
+                    <option value="-14400">AST (UTC-4:00)</option>
+                    <option value="-12600">NST (UTC-3:30)</option>
+                    <option value="-10800">ART (UTC-3:00)</option>
+                    <option value="-7200">GST (UTC-2:00)</option>
+                    <option value="-3600">AZOT (UTC-1:00)</option>
+                    <option value="0">UTC (UTC+0:00)</option>
+                    <option value="3600">CET (UTC+1:00)</option>
+                    <option value="7200">EET (UTC+2:00)</option>
+                    <option value="10800">MSK (UTC+3:00)</option>
+                    <option value="12600">IRST (UTC+3:30)</option>
+                    <option value="14400">GST (UTC+4:00)</option>
+                    <option value="16200">AFT (UTC+4:30)</option>
+                    <option value="18000">PKT (UTC+5:00)</option>
                     <option value="19800">IST (UTC+5:30)</option>
-                    <option value="0">UTC (UTC+0)</option>
-                    <option value="3600">CET (UTC+1)</option>
-                    <option value="7200">EET (UTC+2)</option>
-                    <option value="10800">MSK (UTC+3)</option>
-                    <option value="14400">GST (UTC+4)</option>
-                    <option value="18000">PKT (UTC+5)</option>
-                    <option value="21600">BST (UTC+6)</option>
-                    <option value="25200">ICT (UTC+7)</option>
-                    <option value="28800">CST (UTC+8)</option>
-                    <option value="32400">JST (UTC+9)</option>
-                    <option value="36000">AEST (UTC+10)</option>
-                    <option value="-18000">EST (UTC-5)</option>
-                    <option value="-21600">CST (UTC-6)</option>
-                    <option value="-25200">MST (UTC-7)</option>
-                    <option value="-28800">PST (UTC-8)</option>
+                    <option value="20700">NPT (UTC+5:45)</option>
+                    <option value="21600">BST (UTC+6:00)</option>
+                    <option value="23400">MMT (UTC+6:30)</option>
+                    <option value="25200">ICT (UTC+7:00)</option>
+                    <option value="28800">CST (UTC+8:00)</option>
+                    <option value="30600">CWST (UTC+8:30)</option>
+                    <option value="31500">ACWST (UTC+8:45)</option>
+                    <option value="32400">JST (UTC+9:00)</option>
+                    <option value="34200">ACST (UTC+9:30)</option>
+                    <option value="36000">AEST (UTC+10:00)</option>
+                    <option value="37800">LHST (UTC+10:30)</option>
+                    <option value="39600">SBT (UTC+11:00)</option>
+                    <option value="43200">NZST (UTC+12:00)</option>
+                    <option value="45900">CHAST (UTC+12:45)</option>
+                    <option value="46800">TOT (UTC+13:00)</option>
+                    <option value="50400">LINT (UTC+14:00)</option>
                   </select>
                 </div>
               </div>
@@ -2898,27 +3127,27 @@
           </div>
         </section>
 
-        <!-- Account Section -->
-        <section class="settings-section" id="section-account">
+        <!-- Show Users Section -->
+        <section class="settings-section" id="section-show-users">
           <div class="page-header">
-            <h1 class="page-title">User Management</h1>
-            <p class="page-desc">Manage users and access control</p>
+            <h1 class="page-title">All Users</h1>
+            <p class="page-desc">View registered users and their roles</p>
           </div>
 
           <div class="settings-card">
             <div class="settings-card-header">
-              <span class="settings-card-title">Users</span>
-              <button class="btn btn-primary" onclick="showAddUserModal()">
-                + Add User
+              <span class="settings-card-title">Registered Users</span>
+              <button class="btn btn-secondary btn-small" onclick="loadUsers()">
+                Refresh
               </button>
             </div>
             <div class="settings-card-body">
               <div class="user-list" id="user-list">
                 <div class="user-item">
                   <div class="user-info">
-                    <div class="user-avatar">A</div>
+                    <div class="user-avatar">E</div>
                     <div>
-                      <div class="user-name">Admin</div>
+                      <div class="user-name">esp</div>
                       <div class="user-role">Administrator (default)</div>
                     </div>
                   </div>
@@ -2926,54 +3155,194 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- Add User Section -->
+        <section class="settings-section" id="section-add-user">
+          <div class="page-header">
+            <h1 class="page-title">Add User</h1>
+            <p class="page-desc">
+              Create a new user account (requires admin verification)
+            </p>
+          </div>
 
           <div class="settings-card">
             <div class="settings-card-header">
-              <span class="settings-card-title">Access Settings</span>
+              <span class="settings-card-title">Admin Verification</span>
             </div>
             <div class="settings-card-body">
+              <div class="section-info">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span
+                  >Enter any admin username and password to authorize adding a
+                  new user.</span
+                >
+              </div>
               <div class="setting-row">
                 <div class="setting-info">
-                  <div class="setting-label">Require Authentication</div>
-                  <div class="setting-desc">
-                    Require login to access settings
-                  </div>
+                  <div class="setting-label">Admin Username</div>
                 </div>
                 <div class="setting-control">
-                  <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="auth-required"
-                      onchange="saveSetting('authRequired', this.checked)"
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
+                  <input
+                    type="text"
+                    class="input-field"
+                    id="add-admin-user"
+                    placeholder="Admin username"
+                  />
                 </div>
               </div>
               <div class="setting-row">
                 <div class="setting-info">
-                  <div class="setting-label">Session Timeout</div>
-                  <div class="setting-desc">Auto logout after inactivity</div>
+                  <div class="setting-label">Admin Password</div>
                 </div>
                 <div class="setting-control">
-                  <div class="input-with-unit">
-                    <input
-                      type="number"
-                      class="input-field input-small"
-                      id="session-timeout"
-                      value="30"
-                      min="5"
-                      max="120"
-                      onchange="
-                        saveSetting('sessionTimeout', parseInt(this.value))
-                      "
-                    />
-                    <span class="input-unit">min</span>
-                  </div>
+                  <input
+                    type="password"
+                    class="input-field"
+                    id="add-admin-pass"
+                    placeholder="Admin password"
+                  />
                 </div>
               </div>
             </div>
           </div>
+
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span class="settings-card-title">New User Details</span>
+            </div>
+            <div class="settings-card-body">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Username</div>
+                </div>
+                <div class="setting-control">
+                  <input
+                    type="text"
+                    class="input-field"
+                    id="new-username"
+                    placeholder="Enter username"
+                  />
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Password</div>
+                </div>
+                <div class="setting-control">
+                  <input
+                    type="password"
+                    class="input-field"
+                    id="new-password"
+                    placeholder="Enter password"
+                  />
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Role</div>
+                </div>
+                <div class="setting-control">
+                  <select class="select-field" id="new-role">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" onclick="addUser()">Add User</button>
+        </section>
+
+        <!-- Remove User Section -->
+        <section class="settings-section" id="section-remove-user">
+          <div class="page-header">
+            <h1 class="page-title">Remove User</h1>
+            <p class="page-desc">
+              Remove a user account (requires admin verification)
+            </p>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span class="settings-card-title">Admin Verification</span>
+            </div>
+            <div class="settings-card-body">
+              <div class="section-info">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span
+                  >Enter any admin username and password to authorize removal.
+                  At least one admin user must remain.</span
+                >
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Admin Username</div>
+                </div>
+                <div class="setting-control">
+                  <input
+                    type="text"
+                    class="input-field"
+                    id="rm-admin-user"
+                    placeholder="Admin username"
+                  />
+                </div>
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Admin Password</div>
+                </div>
+                <div class="setting-control">
+                  <input
+                    type="password"
+                    class="input-field"
+                    id="rm-admin-pass"
+                    placeholder="Admin password"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span class="settings-card-title">Select User to Remove</span>
+            </div>
+            <div class="settings-card-body">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <div class="setting-label">Username</div>
+                  <div class="setting-desc">
+                    Select the user you want to remove
+                  </div>
+                </div>
+                <div class="setting-control">
+                  <select class="select-field" id="remove-user-select">
+                    <option value="">-- Select user --</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-danger" onclick="removeUser()">
+            Remove User
+          </button>
         </section>
       </main>
     </div>
@@ -3019,22 +3388,11 @@
 
     <!-- Add Schedule Modal -->
     <div class="modal-overlay" id="schedule-modal">
-      <div class="modal-box" style="max-width: 400px">
-        <div class="modal-icon modal-icon-info">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-        </div>
-        <h3 class="modal-title">Add Daily Schedule</h3>
-        <p class="modal-desc" style="margin-bottom: 20px">
+      <div class="modal-box" style="max-width: 340px; padding: 20px 24px">
+        <h3 class="modal-title" style="font-size: 17px; margin-bottom: 4px">
+          Add Daily Schedule
+        </h3>
+        <p class="modal-desc" style="margin-bottom: 16px; font-size: 13px">
           Set time and days for automatic power control
         </p>
 
@@ -3120,7 +3478,7 @@
           </div>
         </div>
 
-        <div class="modal-actions" style="margin-top: 28px">
+        <div class="modal-actions" style="margin-top: 20px">
           <button
             class="modal-btn modal-btn-cancel"
             onclick="closeScheduleModal()"
@@ -3136,20 +3494,11 @@
 
     <!-- Add Future Schedule Modal -->
     <div class="modal-overlay" id="future-schedule-modal">
-      <div class="modal-box" style="max-width: 400px">
-        <div class="modal-icon modal-icon-info">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-        </div>
-        <h3 class="modal-title">Add Future Schedule</h3>
-        <p class="modal-desc" style="margin-bottom: 20px">
+      <div class="modal-box" style="max-width: 340px; padding: 20px 24px">
+        <h3 class="modal-title" style="font-size: 17px; margin-bottom: 4px">
+          Add Future Schedule
+        </h3>
+        <p class="modal-desc" style="margin-bottom: 16px; font-size: 13px">
           One-time schedule for a specific date and time
         </p>
 
@@ -3218,7 +3567,7 @@
           <input type="hidden" id="future-action" value="on" />
         </div>
 
-        <div class="modal-actions" style="margin-top: 28px">
+        <div class="modal-actions" style="margin-top: 20px">
           <button
             class="modal-btn modal-btn-cancel"
             onclick="closeFutureScheduleModal()"
@@ -3235,55 +3584,91 @@
       </div>
     </div>
 
-    <!-- Add User Modal -->
-    <div class="modal-overlay" id="user-modal">
-      <div class="modal-box" style="max-width: 420px; text-align: left">
-        <h3 class="modal-title" style="text-align: center; margin-bottom: 20px">
-          Add User
-        </h3>
-        <div class="setting-row" style="padding: 10px 0">
-          <div class="setting-info">
-            <div class="setting-label">Username</div>
-          </div>
-          <div class="setting-control">
-            <input
-              type="text"
-              class="input-field"
-              id="new-username"
-              placeholder="Enter username"
-            />
-          </div>
+    <!-- Login Modal -->
+    <div class="login-overlay" id="login-modal">
+      <div class="login-box">
+        <div class="login-icon">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
         </div>
-        <div class="setting-row" style="padding: 10px 0">
-          <div class="setting-info">
-            <div class="setting-label">Password</div>
-          </div>
-          <div class="setting-control">
-            <input
-              type="password"
-              class="input-field"
-              id="new-password"
-              placeholder="Enter password"
-            />
-          </div>
+        <h2 class="login-title">Authentication Required</h2>
+        <p class="login-desc">Enter your credentials to access settings</p>
+        <input
+          type="text"
+          class="login-field"
+          id="login-username"
+          placeholder="Username"
+          autocomplete="username"
+        />
+        <input
+          type="password"
+          class="login-field"
+          id="login-password"
+          placeholder="Password"
+          autocomplete="current-password"
+        />
+        <div class="login-error" id="login-error">
+          Invalid username or password
         </div>
-        <div class="setting-row" style="padding: 10px 0">
-          <div class="setting-info">
-            <div class="setting-label">Role</div>
-          </div>
-          <div class="setting-control">
-            <select class="select-field" id="new-role">
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
+        <button class="login-btn" onclick="verifyLogin()">Login</button>
+      </div>
+    </div>
+
+    <!-- Admin Verification Modal -->
+    <div class="modal-overlay" id="admin-verify-modal">
+      <div class="modal-box" style="max-width: 380px">
+        <div class="modal-icon modal-icon-warning">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
         </div>
-        <div class="modal-actions" style="margin-top: 24px">
-          <button class="modal-btn modal-btn-cancel" onclick="closeUserModal()">
+        <h3 class="modal-title">Admin Verification Required</h3>
+        <p class="modal-desc">
+          This action requires admin privileges. Enter admin credentials to
+          proceed.
+        </p>
+        <div class="admin-verify-fields">
+          <input
+            type="text"
+            class="login-field"
+            id="admin-verify-user"
+            placeholder="Admin username"
+          />
+          <input
+            type="password"
+            class="login-field"
+            id="admin-verify-pass"
+            placeholder="Admin password"
+          />
+        </div>
+        <div class="login-error" id="admin-verify-error">
+          Invalid admin credentials
+        </div>
+        <div class="modal-actions">
+          <button
+            class="modal-btn modal-btn-cancel"
+            onclick="closeAdminVerify()"
+          >
             Cancel
           </button>
-          <button class="modal-btn modal-btn-confirm" onclick="saveUser()">
-            Add User
+          <button
+            class="modal-btn modal-btn-confirm"
+            onclick="confirmAdminVerify()"
+          >
+            Verify
           </button>
         </div>
       </div>
@@ -3295,6 +3680,129 @@
 
     <script>
       let settings = {};
+      let currentUser = null;
+      let adminVerifyCallback = null;
+
+      // Verify credentials using /users/list + default fallback
+      async function verifyCredentials(username, password) {
+        try {
+          var response = await fetch("/users/list");
+          var users = await response.json();
+          if (Array.isArray(users)) {
+            var user = users.find(function (u) {
+              return u.username === username && u.password === password;
+            });
+            if (user) {
+              return {
+                success: true,
+                role: user.role,
+                username: user.username,
+              };
+            }
+            // User list loaded but no match
+            return { success: false, error: "Invalid username or password" };
+          }
+        } catch (e) {}
+        // Fallback: default admin user when /users/list is unavailable
+        if (username === "esp" && password === "456456") {
+          return { success: true, role: "admin", username: "esp" };
+        }
+        return { success: false, error: "Invalid username or password" };
+      }
+
+      // Login verification
+      function verifyLogin() {
+        var username = document.getElementById("login-username").value.trim();
+        var password = document.getElementById("login-password").value;
+        var errorEl = document.getElementById("login-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter username and password";
+          errorEl.style.display = "block";
+          return;
+        }
+
+        verifyCredentials(username, password).then(function (d) {
+          if (d.success) {
+            currentUser = {
+              username: d.username || username,
+              role: d.role,
+            };
+            document.getElementById("login-modal").style.display = "none";
+            loadSettings();
+            loadSchedules();
+            loadFutureSchedules();
+            loadUsers();
+            fetch("/automation/timer/status")
+              .then(function (r) {
+                return r.json();
+              })
+              .then(function (d) {
+                if (d.active && d.remaining > 0) {
+                  timerEndTime = Date.now() + d.remaining * 1000;
+                  updateTimerDisplay();
+                  timerInterval = setInterval(updateTimerDisplay, 1000);
+                }
+              })
+              .catch(function () {});
+          } else {
+            errorEl.textContent = d.error || "Invalid username or password";
+            errorEl.style.display = "block";
+          }
+        });
+      }
+
+      // Admin verification for protected actions
+      function requireAdmin(callback) {
+        if (currentUser && currentUser.role === "admin") {
+          callback();
+          return;
+        }
+        adminVerifyCallback = callback;
+        document.getElementById("admin-verify-user").value = "";
+        document.getElementById("admin-verify-pass").value = "";
+        document.getElementById("admin-verify-error").style.display = "none";
+        document.getElementById("admin-verify-modal").classList.add("active");
+      }
+
+      function closeAdminVerify() {
+        document
+          .getElementById("admin-verify-modal")
+          .classList.remove("active");
+        adminVerifyCallback = null;
+      }
+
+      function confirmAdminVerify() {
+        var username = document
+          .getElementById("admin-verify-user")
+          .value.trim();
+        var password = document.getElementById("admin-verify-pass").value;
+        var errorEl = document.getElementById("admin-verify-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter admin credentials";
+          errorEl.style.display = "block";
+          return;
+        }
+
+        verifyCredentials(username, password).then(function (d) {
+          if (d.success && d.role === "admin") {
+            document
+              .getElementById("admin-verify-modal")
+              .classList.remove("active");
+            if (adminVerifyCallback) {
+              adminVerifyCallback();
+              adminVerifyCallback = null;
+            }
+          } else {
+            errorEl.textContent =
+              d.success && d.role !== "admin"
+                ? "User is not an admin"
+                : d.error || "Invalid credentials";
+            errorEl.style.display = "block";
+          }
+        });
+      }
 
       // Navigation
       document.querySelectorAll(".nav-item").forEach((item) => {
@@ -3436,8 +3944,28 @@
         }
       }
 
+      // Protected setting keys (require admin verification)
+      var protectedSettingKeys = new Set([
+        "mainOutput",
+        "kWhSaver",
+        "afpcEnabled",
+        "targetFactor",
+        "mfdPerChannel",
+        "fbEnabled",
+      ]);
+
       // Save individual setting
-      async function saveSetting(key, value) {
+      function saveSetting(key, value) {
+        if (protectedSettingKeys.has(key)) {
+          requireAdmin(function () {
+            _doSaveSetting(key, value);
+          });
+          return;
+        }
+        _doSaveSetting(key, value);
+      }
+
+      async function _doSaveSetting(key, value) {
         try {
           const response = await fetch("/setting/set", {
             method: "POST",
@@ -3585,7 +4113,21 @@
       // Confirmation Modal System
       let pendingAction = null;
 
-      function showConfirmModal(type, title, description, action) {
+      function showConfirmModal(
+        typeOrAction,
+        title,
+        description,
+        actionOrType,
+      ) {
+        var type, action;
+        var knownTypes = ["danger", "warning", "info", "success"];
+        if (knownTypes.indexOf(typeOrAction) !== -1) {
+          type = typeOrAction;
+          action = actionOrType;
+        } else {
+          type = typeof actionOrType === "string" ? actionOrType : "warning";
+          action = typeOrAction;
+        }
         pendingAction = action;
         const modal = document.getElementById("confirm-modal");
         const modalIcon = document.getElementById("modal-icon");
@@ -3623,8 +4165,13 @@
       }
 
       function executeModalAction() {
-        if (pendingAction && typeof pendingAction === "function") {
+        if (typeof pendingAction === "function") {
           pendingAction();
+        } else if (
+          typeof pendingAction === "string" &&
+          typeof window[pendingAction] === "function"
+        ) {
+          window[pendingAction]();
         }
         closeConfirmModal();
       }
@@ -3664,6 +4211,177 @@
         fetch("/restart", { method: "POST" })
           .then(() => showToast("Device restarting..."))
           .catch(() => showToast("Failed", "error"));
+      }
+
+      // Section save functions
+      function saveOutputSettings() {
+        const data = {
+          mainOutput: document.getElementById("main-output").checked,
+          kWhSaver: document.getElementById("kwh-saver").checked,
+        };
+        fetch("/output/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Output settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveAfpcSettings() {
+        const data = {
+          afpcEnabled: document.getElementById("afpc-enabled").checked,
+          targetFactor: parseFloat(document.getElementById("target-pf").value),
+          mfdPerChannel: parseFloat(
+            document.getElementById("mfd-channel").value,
+          ),
+        };
+        fetch("/afpc/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "AFPC settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveAlertSettings() {
+        const data = {
+          highVoltageAlert: document.getElementById("alert-volt-high").checked,
+          lowVoltageAlert: document.getElementById("alert-volt-low").checked,
+          highPowerAlert: document.getElementById("alert-power-high").checked,
+          lowPowerAlert: document.getElementById("alert-power-low").checked,
+          lowFreqAlert: document.getElementById("alert-freq-low").checked,
+          highFreqAlert: document.getElementById("alert-freq-high").checked,
+        };
+        fetch("/alerts/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Alert settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveProtectionSettings() {
+        const data = {
+          highVProtec: document.getElementById("prot-volt-high").checked,
+          LowVProtec: document.getElementById("prot-volt-low").checked,
+          highPProtec: document.getElementById("prot-power-high").checked,
+          highHzProtec: document.getElementById("prot-freq-high").checked,
+          lowHzProtec: document.getElementById("prot-freq-low").checked,
+        };
+        fetch("/protection/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Protection settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveIntervalSettings() {
+        const data = {
+          espShareInterval: parseInt(
+            document.getElementById("interval-esp").value,
+          ),
+          nodeRedInterval: parseInt(
+            document.getElementById("interval-nodered").value,
+          ),
+          pzemInterval: parseInt(
+            document.getElementById("interval-pzem").value,
+          ),
+          alertInterval: parseInt(
+            document.getElementById("interval-alert").value,
+          ),
+          protectionDelay: parseInt(
+            document.getElementById("interval-protection").value,
+          ),
+        };
+        fetch("/intervals/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Interval settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveStartupSettings() {
+        const data = {
+          startupTime: parseInt(document.getElementById("startup-delay").value),
+        };
+        fetch("/startup/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Startup settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      // Threshold save function
+      function saveThresholdSettings() {
+        const data = {
+          voltHigh: parseInt(document.getElementById("volt-high").value),
+          voltLow: parseInt(document.getElementById("volt-low").value),
+          powerHigh: parseInt(document.getElementById("power-high").value),
+          powerLow: parseInt(document.getElementById("power-low").value),
+          maxkWh: parseInt(document.getElementById("max-kwh").value),
+          freqHigh: parseFloat(document.getElementById("freq-high").value),
+          freqLow: parseFloat(document.getElementById("freq-low").value),
+          afpcLowWatt: parseInt(document.getElementById("afpc-low").value),
+          afpcHighWatt: parseInt(document.getElementById("afpc-high").value),
+        };
+        fetch("/thresholds/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Thresholds saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
       }
 
       // Timezone functions
@@ -4000,25 +4718,69 @@
         );
       }
 
-      // User Management Modal functions
-      function showAddUserModal() {
-        document.getElementById("new-username").value = "";
-        document.getElementById("new-password").value = "";
-        document.getElementById("new-role").value = "user";
-        document.getElementById("user-modal").classList.add("active");
+      // User Management functions
+      function loadUsers() {
+        fetch("/users/list")
+          .then((r) => r.json())
+          .then((users) => {
+            const list = document.getElementById("user-list");
+            const removeSelect = document.getElementById("remove-user-select");
+
+            if (!users || users.length === 0) {
+              list.innerHTML =
+                '<div class="user-item"><div class="user-info"><div class="user-avatar">E</div><div><div class="user-name">esp</div><div class="user-role">Administrator (default)</div></div></div></div>';
+              if (removeSelect) {
+                removeSelect.innerHTML =
+                  '<option value="">-- No users --</option>';
+              }
+              return;
+            }
+            list.innerHTML = users
+              .map(
+                (u) => `
+              <div class="user-item">
+                <div class="user-info">
+                  <div class="user-avatar">${u.username.charAt(0).toUpperCase()}</div>
+                  <div>
+                    <div class="user-name">${u.username}</div>
+                    <div class="user-role">${u.role === "admin" ? "Administrator" : "User"}${u.username === "esp" ? " (default)" : ""}</div>
+                  </div>
+                </div>
+              </div>
+            `,
+              )
+              .join("");
+
+            // Populate remove user dropdown
+            if (removeSelect) {
+              removeSelect.innerHTML =
+                '<option value="">-- Select user --</option>' +
+                users
+                  .map(
+                    (u) =>
+                      `<option value="${u.username}">${u.username} (${u.role})</option>`,
+                  )
+                  .join("");
+            }
+          })
+          .catch(() => {});
       }
 
-      function closeUserModal() {
-        document.getElementById("user-modal").classList.remove("active");
-      }
-
-      function saveUser() {
+      function addUser() {
+        const adminUser = document
+          .getElementById("add-admin-user")
+          .value.trim();
+        const adminPass = document.getElementById("add-admin-pass").value;
         const username = document.getElementById("new-username").value.trim();
         const password = document.getElementById("new-password").value;
         const role = document.getElementById("new-role").value;
 
+        if (!adminUser || !adminPass) {
+          showToast("Enter admin credentials to verify", "error");
+          return;
+        }
         if (!username || !password) {
-          showToast("Please fill all fields", "error");
+          showToast("Please fill all new user fields", "error");
           return;
         }
         if (username.length < 3) {
@@ -4033,14 +4795,22 @@
         fetch("/users/add", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, role }),
+          body: JSON.stringify({
+            adminUser,
+            adminPass,
+            username,
+            password,
+            role,
+          }),
         })
           .then((r) => r.json())
           .then((d) => {
             if (d.success) {
-              closeUserModal();
+              showToast("User added successfully");
+              document.getElementById("new-username").value = "";
+              document.getElementById("new-password").value = "";
+              document.getElementById("new-role").value = "user";
               loadUsers();
-              showToast("User added");
             } else {
               showToast(d.error || "Failed to add user", "error");
             }
@@ -4048,54 +4818,40 @@
           .catch(() => showToast("Connection error", "error"));
       }
 
-      function loadUsers() {
-        fetch("/users/list")
-          .then((r) => r.json())
-          .then((users) => {
-            const list = document.getElementById("user-list");
-            if (!users || users.length === 0) {
-              list.innerHTML =
-                '<div class="user-item"><div class="user-info"><div class="user-avatar">A</div><div><div class="user-name">Admin</div><div class="user-role">Administrator (default)</div></div></div></div>';
-              return;
-            }
-            list.innerHTML = users
-              .map(
-                (u) => `
-              <div class="user-item">
-                <div class="user-info">
-                  <div class="user-avatar">${u.username.charAt(0).toUpperCase()}</div>
-                  <div>
-                    <div class="user-name">${u.username}</div>
-                    <div class="user-role">${u.role === "admin" ? "Administrator" : "User"}</div>
-                  </div>
-                </div>
-                ${u.username !== "admin" ? `<button class="btn btn-danger btn-small" onclick="deleteUser('${u.username}')">Remove</button>` : ""}
-              </div>
-            `,
-              )
-              .join("");
-          })
-          .catch(() => {});
-      }
+      function removeUser() {
+        const adminUser = document.getElementById("rm-admin-user").value.trim();
+        const adminPass = document.getElementById("rm-admin-pass").value;
+        const username = document.getElementById("remove-user-select").value;
 
-      function deleteUser(username) {
+        if (!adminUser || !adminPass) {
+          showToast("Enter admin credentials to verify", "error");
+          return;
+        }
+        if (!username) {
+          showToast("Select a user to remove", "error");
+          return;
+        }
+
         showConfirmModal(
           "danger",
           "Remove User",
-          `Are you sure you want to remove user "${username}"?`,
+          'Are you sure you want to remove user "' +
+            username +
+            '"? At least one admin must remain.',
           () => {
             fetch("/users/delete", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ username }),
+              body: JSON.stringify({ adminUser, adminPass, username }),
             })
               .then((r) => r.json())
               .then((d) => {
                 if (d.success) {
                   loadUsers();
                   showToast("User removed");
+                  document.getElementById("remove-user-select").value = "";
                 } else {
-                  showToast(d.error || "Failed", "error");
+                  showToast(d.error || "Failed to remove user", "error");
                 }
               })
               .catch(() => showToast("Connection error", "error"));
@@ -4105,23 +4861,57 @@
 
       // Initialize
       document.addEventListener("DOMContentLoaded", () => {
-        loadSettings();
-        loadSchedules();
-        loadFutureSchedules();
-        loadUsers();
-
-        // Check for active timer on load
-        fetch("/automation/timer/status")
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.active && d.remaining > 0) {
-              timerEndTime = Date.now() + d.remaining * 1000;
-              updateTimerDisplay();
-              timerInterval = setInterval(updateTimerDisplay, 1000);
-            }
-          })
-          .catch(() => {});
+        // Login modal is shown by default - data loads after successful login
+        document
+          .getElementById("login-password")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") verifyLogin();
+          });
+        document
+          .getElementById("login-username")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter")
+              document.getElementById("login-password").focus();
+          });
+        // Enter key for admin verify modal
+        document
+          .getElementById("admin-verify-pass")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") confirmAdminVerify();
+          });
       });
+
+      // Protect functions requiring admin verification
+      (function () {
+        var protectedFns = [
+          "saveFirebaseSettings",
+          "saveFirebaseRules",
+          "saveOutputSettings",
+          "saveAfpcSettings",
+          "clearEnergy",
+          "clearDays",
+          "factoryResetData",
+          "factoryResetSettings",
+          "restartDevice",
+          "forgetFirebase",
+          "startTimer",
+          "cancelTimer",
+          "saveSchedule",
+          "saveFutureSchedule",
+          "deleteSchedule",
+          "deleteFutureSchedule",
+        ];
+        protectedFns.forEach(function (name) {
+          var original = window[name];
+          window[name] = function () {
+            var args = arguments;
+            var self = this;
+            requireAdmin(function () {
+              original.apply(self, args);
+            });
+          };
+        });
+      })();
     </script>
   </body>
 </html>

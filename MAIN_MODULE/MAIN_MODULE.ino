@@ -67,7 +67,7 @@ const char MSG_DEVELOPER[] PROGMEM = "developed by M.Maity";
 
 // -- Time Management
 const char *ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = 19800;
+long gmtOffset_sec = 19800;
 const int daylightOffset_sec = 0;
 
 // -- Days Tracking
@@ -149,6 +149,7 @@ struct __attribute__((packed)) Settings
   // Communication Settings
   bool nodeRedEnabled;
   char nodeRedIP[32];
+  int nodeRedPort;
 
   // Protection Settings
   bool highVoltageAlert, lowVoltageAlert;
@@ -247,6 +248,44 @@ const char *clearDataSubmenu[] = {"Back", "Clear kWh", "Clear Days"};
 const char *mainOutputSubmenu[] = {"Back", "Enable/Disable", "kWh Saver"};
 const char *factoryResetSubmenu[] = {"Back", "Reset Data", "Reset Settings"};
 const char *updateIntervalSubmenu[] = {"Back", "ESP Sharing", "Node-Red Update", "Sensor Update", "Safety Alert", "Protection Delay"};
+
+// Timer
+unsigned long timerEndMillis = 0;
+bool timerActive = false;
+
+// Schedules (max 10)
+#define MAX_SCHEDULES 10
+struct Schedule
+{
+  char time[6];
+  bool actionOn;
+  uint8_t days[7];
+  uint8_t dayCount;
+};
+Schedule schedules[MAX_SCHEDULES];
+int scheduleCount = 0;
+
+// Future Schedules (max 10)
+#define MAX_FUTURE_SCHEDULES 10
+struct FutureSchedule
+{
+  char date[11];
+  char time[6];
+  bool actionOn;
+};
+FutureSchedule futureSchedules[MAX_FUTURE_SCHEDULES];
+int futureScheduleCount = 0;
+
+// Users (max 5)
+#define MAX_USERS 5
+struct User
+{
+  char username[20];
+  char password[20];
+  char role[10];
+};
+User users[MAX_USERS];
+int userCount = 0;
 
 // 1. Basic Utility Functions
 void playBeep(int duration)
@@ -849,7 +888,255 @@ void updatePzemReadings()
   }
 }
 
-// 11. Async Web Server
+// 11. User, Schedule & Timer Management
+
+void loadUsersFromFile()
+{
+  if (!SPIFFS.exists("/users.json"))
+  {
+    userCount = 1;
+    strcpy(users[0].username, "esp");
+    strcpy(users[0].password, "456456");
+    strcpy(users[0].role, "admin");
+    saveUsersToFile();
+    return;
+  }
+  File f = SPIFFS.open("/users.json", "r");
+  if (!f)
+    return;
+  StaticJsonDocument<1024> doc;
+  deserializeJson(doc, f);
+  f.close();
+  JsonArray arr = doc.as<JsonArray>();
+  userCount = 0;
+  for (JsonObject u : arr)
+  {
+    if (userCount >= MAX_USERS)
+      break;
+    strncpy(users[userCount].username, u["username"] | "", 19);
+    users[userCount].username[19] = '\0';
+    strncpy(users[userCount].password, u["password"] | "", 19);
+    users[userCount].password[19] = '\0';
+    strncpy(users[userCount].role, u["role"] | "user", 9);
+    users[userCount].role[9] = '\0';
+    userCount++;
+  }
+  if (userCount == 0)
+  {
+    userCount = 1;
+    strcpy(users[0].username, "esp");
+    strcpy(users[0].password, "456456");
+    strcpy(users[0].role, "admin");
+    saveUsersToFile();
+  }
+}
+
+void saveUsersToFile()
+{
+  StaticJsonDocument<1024> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < userCount; i++)
+  {
+    JsonObject u = arr.createNestedObject();
+    u["username"] = users[i].username;
+    u["password"] = users[i].password;
+    u["role"] = users[i].role;
+  }
+  File f = SPIFFS.open("/users.json", "w");
+  if (f)
+  {
+    serializeJson(doc, f);
+    f.close();
+  }
+}
+
+void loadSchedulesFromFile()
+{
+  scheduleCount = 0;
+  if (!SPIFFS.exists("/schedules.json"))
+    return;
+  File f = SPIFFS.open("/schedules.json", "r");
+  if (!f)
+    return;
+  StaticJsonDocument<2048> doc;
+  deserializeJson(doc, f);
+  f.close();
+  JsonArray arr = doc.as<JsonArray>();
+  for (JsonObject s : arr)
+  {
+    if (scheduleCount >= MAX_SCHEDULES)
+      break;
+    strncpy(schedules[scheduleCount].time, s["time"] | "00:00", 5);
+    schedules[scheduleCount].time[5] = '\0';
+    schedules[scheduleCount].actionOn = (String(s["action"] | "off") == "on");
+    JsonArray days = s["days"];
+    schedules[scheduleCount].dayCount = 0;
+    for (JsonVariant d : days)
+    {
+      if (schedules[scheduleCount].dayCount < 7)
+        schedules[scheduleCount].days[schedules[scheduleCount].dayCount++] = d.as<uint8_t>();
+    }
+    scheduleCount++;
+  }
+}
+
+void saveSchedulesToFile()
+{
+  StaticJsonDocument<2048> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < scheduleCount; i++)
+  {
+    JsonObject s = arr.createNestedObject();
+    s["time"] = schedules[i].time;
+    s["action"] = schedules[i].actionOn ? "on" : "off";
+    JsonArray days = s.createNestedArray("days");
+    for (int j = 0; j < schedules[i].dayCount; j++)
+      days.add(schedules[i].days[j]);
+  }
+  File f = SPIFFS.open("/schedules.json", "w");
+  if (f)
+  {
+    serializeJson(doc, f);
+    f.close();
+  }
+}
+
+void loadFutureSchedulesFromFile()
+{
+  futureScheduleCount = 0;
+  if (!SPIFFS.exists("/future.json"))
+    return;
+  File f = SPIFFS.open("/future.json", "r");
+  if (!f)
+    return;
+  StaticJsonDocument<2048> doc;
+  deserializeJson(doc, f);
+  f.close();
+  JsonArray arr = doc.as<JsonArray>();
+  for (JsonObject s : arr)
+  {
+    if (futureScheduleCount >= MAX_FUTURE_SCHEDULES)
+      break;
+    strncpy(futureSchedules[futureScheduleCount].date, s["date"] | "", 10);
+    futureSchedules[futureScheduleCount].date[10] = '\0';
+    strncpy(futureSchedules[futureScheduleCount].time, s["time"] | "00:00", 5);
+    futureSchedules[futureScheduleCount].time[5] = '\0';
+    futureSchedules[futureScheduleCount].actionOn = (String(s["action"] | "off") == "on");
+    futureScheduleCount++;
+  }
+}
+
+void saveFutureSchedulesToFile()
+{
+  StaticJsonDocument<2048> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (int i = 0; i < futureScheduleCount; i++)
+  {
+    JsonObject s = arr.createNestedObject();
+    s["date"] = futureSchedules[i].date;
+    s["time"] = futureSchedules[i].time;
+    s["action"] = futureSchedules[i].actionOn ? "on" : "off";
+  }
+  File f = SPIFFS.open("/future.json", "w");
+  if (f)
+  {
+    serializeJson(doc, f);
+    f.close();
+  }
+}
+
+void checkTimer()
+{
+  if (timerActive && millis() >= timerEndMillis)
+  {
+    timerActive = false;
+    settings.mainOutput = false;
+    saveSettings();
+    digitalWrite(MAIN_RELAY, HIGH);
+    playBeep(3);
+    Serial.println("Timer expired - output OFF");
+  }
+}
+
+void checkSchedules()
+{
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck < 30000)
+    return;
+  lastCheck = millis();
+  if (scheduleCount == 0)
+    return;
+
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo))
+    return;
+
+  char currentTime[6];
+  strftime(currentTime, sizeof(currentTime), "%H:%M", &timeinfo);
+  int currentDay = (timeinfo.tm_wday + 6) % 7;
+
+  for (int i = 0; i < scheduleCount; i++)
+  {
+    if (strcmp(schedules[i].time, currentTime) == 0)
+    {
+      for (int j = 0; j < schedules[i].dayCount; j++)
+      {
+        if (schedules[i].days[j] == currentDay)
+        {
+          bool newState = schedules[i].actionOn;
+          if (settings.mainOutput != newState)
+          {
+            settings.mainOutput = newState;
+            saveSettings();
+            digitalWrite(MAIN_RELAY, newState ? LOW : HIGH);
+            Serial.printf("Schedule: %s at %s\n", newState ? "ON" : "OFF", currentTime);
+          }
+          break;
+        }
+      }
+    }
+  }
+}
+
+void checkFutureSchedules()
+{
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck < 30000)
+    return;
+  lastCheck = millis();
+  if (futureScheduleCount == 0)
+    return;
+
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo))
+    return;
+
+  char currentDate[11], currentTime[6];
+  strftime(currentDate, sizeof(currentDate), "%Y-%m-%d", &timeinfo);
+  strftime(currentTime, sizeof(currentTime), "%H:%M", &timeinfo);
+
+  bool changed = false;
+  for (int i = futureScheduleCount - 1; i >= 0; i--)
+  {
+    if (strcmp(futureSchedules[i].date, currentDate) == 0 &&
+        strcmp(futureSchedules[i].time, currentTime) == 0)
+    {
+      bool newState = futureSchedules[i].actionOn;
+      settings.mainOutput = newState;
+      saveSettings();
+      digitalWrite(MAIN_RELAY, newState ? LOW : HIGH);
+      Serial.printf("Future schedule: %s\n", newState ? "ON" : "OFF");
+      for (int j = i; j < futureScheduleCount - 1; j++)
+        futureSchedules[j] = futureSchedules[j + 1];
+      futureScheduleCount--;
+      changed = true;
+    }
+  }
+  if (changed)
+    saveFutureSchedulesToFile();
+}
+
+// 12. Async Web Server
 // void handleGetData(AsyncWebServerRequest* request) {
 //   AsyncResponseStream* response = request->beginResponseStream("application/json");
 //   StaticJsonDocument<200> jsonDoc;
@@ -999,7 +1286,7 @@ void setupWebServer()
     doc["startupTime"] = settings.startupTime;
     doc["fbEnabled"] = fbSettings.enabled;
     doc["fbHost"] = fbSettings.host;
-    doc["fbInterval"] = fbSettings.uploadInterval;
+    doc["fbInterval"] = fbSettings.dataInterval;
     
     String response;
     serializeJson(doc, response);
@@ -1136,7 +1423,7 @@ void setupWebServer()
       if (!error) {
         if (doc.containsKey("host")) strncpy(fbSettings.host, doc["host"].as<const char*>(), sizeof(fbSettings.host) - 1);
         if (doc.containsKey("auth")) strncpy(fbSettings.auth, doc["auth"].as<const char*>(), sizeof(fbSettings.auth) - 1);
-        if (doc.containsKey("interval")) fbSettings.uploadInterval = doc["interval"].as<int>();
+        if (doc.containsKey("interval")) fbSettings.dataInterval = doc["interval"].as<int>();
         saveFirebaseSettings();
         playBeep(1);
         request->send(200, "application/json", "{\"success\":true}");
@@ -1211,6 +1498,361 @@ void setupWebServer()
     request->send(200, "application/json", "{\"success\":true}");
     delay(500);
     ESP.restart(); });
+
+  // Batch Save Routes
+  server.on("/output/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("mainOutput")) { settings.mainOutput = doc["mainOutput"].as<bool>(); digitalWrite(MAIN_RELAY, settings.mainOutput ? LOW : HIGH); }
+        if (doc.containsKey("kWhSaver")) settings.kWhSaver = doc["kWhSaver"].as<bool>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/afpc/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("afpcEnabled")) settings.afpcEnabled = doc["afpcEnabled"].as<bool>();
+        if (doc.containsKey("targetFactor")) settings.targetFactor = doc["targetFactor"].as<float>();
+        if (doc.containsKey("mfdPerChannel")) settings.mfdPerChannel = doc["mfdPerChannel"].as<float>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/alerts/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("highVoltageAlert")) settings.highVoltageAlert = doc["highVoltageAlert"].as<bool>();
+        if (doc.containsKey("lowVoltageAlert")) settings.lowVoltageAlert = doc["lowVoltageAlert"].as<bool>();
+        if (doc.containsKey("highPowerAlert")) settings.highPowerAlert = doc["highPowerAlert"].as<bool>();
+        if (doc.containsKey("lowPowerAlert")) settings.lowPowerAlert = doc["lowPowerAlert"].as<bool>();
+        if (doc.containsKey("lowFreqAlert")) settings.lowFreqAlert = doc["lowFreqAlert"].as<bool>();
+        if (doc.containsKey("highFreqAlert")) settings.highFreqAlert = doc["highFreqAlert"].as<bool>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/protection/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("highVProtec")) settings.highVProtec = doc["highVProtec"].as<bool>();
+        if (doc.containsKey("LowVProtec")) settings.LowVProtec = doc["LowVProtec"].as<bool>();
+        if (doc.containsKey("highPProtec")) settings.highPProtec = doc["highPProtec"].as<bool>();
+        if (doc.containsKey("highHzProtec")) settings.highHzProtec = doc["highHzProtec"].as<bool>();
+        if (doc.containsKey("lowHzProtec")) settings.lowHzProtec = doc["lowHzProtec"].as<bool>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/intervals/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("espShareInterval")) settings.espShareInterval = doc["espShareInterval"].as<int>();
+        if (doc.containsKey("nodeRedInterval")) settings.nodeRedInterval = doc["nodeRedInterval"].as<int>();
+        if (doc.containsKey("pzemInterval")) settings.pzemInterval = doc["pzemInterval"].as<int>();
+        if (doc.containsKey("alertInterval")) settings.alertInterval = doc["alertInterval"].as<int>();
+        if (doc.containsKey("protectionDelay")) { settings.protectionDelay = doc["protectionDelay"].as<int>(); PROTECTION_DELAY = settings.protectionDelay * 1000UL; }
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/startup/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("startupTime")) settings.startupTime = doc["startupTime"].as<int>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/thresholds/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        if (doc.containsKey("voltHigh")) settings.voltHigh = doc["voltHigh"].as<int>();
+        if (doc.containsKey("voltLow")) settings.voltLow = doc["voltLow"].as<int>();
+        if (doc.containsKey("powerHigh")) settings.powerHigh = doc["powerHigh"].as<int>();
+        if (doc.containsKey("powerLow")) settings.powerLow = doc["powerLow"].as<int>();
+        if (doc.containsKey("maxkWh")) settings.maxkWh = doc["maxkWh"].as<int>();
+        if (doc.containsKey("freqHigh")) settings.freqHigh = doc["freqHigh"].as<float>();
+        if (doc.containsKey("freqLow")) settings.freqLow = doc["freqLow"].as<float>();
+        if (doc.containsKey("afpcLowWatt")) settings.afpcLowWatt = doc["afpcLowWatt"].as<int>();
+        if (doc.containsKey("afpcHighWatt")) settings.afpcHighWatt = doc["afpcHighWatt"].as<int>();
+        saveSettings();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  // Timezone Route
+  server.on("/time/timezone", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        int offset = doc["offset"].as<int>();
+        gmtOffset_sec = offset;
+        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  // Firebase Rules Route
+  server.on("/firebase/rules", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<2048> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        String rules = doc["rules"].as<String>();
+        File f = SPIFFS.open("/fb_rules.json", "w");
+        if (f) { f.print(rules); f.close(); }
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  // Timer Routes
+  server.on("/automation/timer/start", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        int duration = doc["duration"].as<int>();
+        timerEndMillis = millis() + (unsigned long)duration * 1000;
+        timerActive = true;
+        playBeep(1);
+        Serial.printf("Timer started: %d seconds\n", duration);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/automation/timer/cancel", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
+    timerActive = false;
+    timerEndMillis = 0;
+    playBeep(1);
+    request->send(200, "application/json", "{\"success\":true}"); });
+
+  server.on("/automation/timer/status", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    StaticJsonDocument<200> doc;
+    doc["active"] = timerActive;
+    if (timerActive) {
+      unsigned long remaining = (timerEndMillis > millis()) ? (timerEndMillis - millis()) / 1000 : 0;
+      doc["remaining"] = remaining;
+    } else {
+      doc["remaining"] = 0;
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
+
+  // Schedule Routes
+  server.on("/automation/schedule/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      if (scheduleCount >= MAX_SCHEDULES) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Max schedules reached\"}");
+        return;
+      }
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        strncpy(schedules[scheduleCount].time, doc["time"] | "00:00", 5);
+        schedules[scheduleCount].time[5] = '\0';
+        schedules[scheduleCount].actionOn = (String(doc["action"] | "off") == "on");
+        JsonArray days = doc["days"];
+        schedules[scheduleCount].dayCount = 0;
+        for (JsonVariant d : days) {
+          if (schedules[scheduleCount].dayCount < 7)
+            schedules[scheduleCount].days[schedules[scheduleCount].dayCount++] = d.as<uint8_t>();
+        }
+        scheduleCount++;
+        saveSchedulesToFile();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/automation/schedule/list", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < scheduleCount; i++) {
+      JsonObject s = arr.createNestedObject();
+      s["time"] = schedules[i].time;
+      s["action"] = schedules[i].actionOn ? "on" : "off";
+      JsonArray days = s.createNestedArray("days");
+      for (int j = 0; j < schedules[i].dayCount; j++) days.add(schedules[i].days[j]);
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
+
+  server.on("/automation/schedule/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        int idx = doc["index"].as<int>();
+        if (idx >= 0 && idx < scheduleCount) {
+          for (int i = idx; i < scheduleCount - 1; i++) schedules[i] = schedules[i + 1];
+          scheduleCount--;
+          saveSchedulesToFile();
+          playBeep(1);
+          request->send(200, "application/json", "{\"success\":true}");
+        } else request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid index\"}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  // Future Schedule Routes
+  server.on("/automation/future/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      if (futureScheduleCount >= MAX_FUTURE_SCHEDULES) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Max future schedules reached\"}");
+        return;
+      }
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        strncpy(futureSchedules[futureScheduleCount].date, doc["date"] | "", 10);
+        futureSchedules[futureScheduleCount].date[10] = '\0';
+        strncpy(futureSchedules[futureScheduleCount].time, doc["time"] | "00:00", 5);
+        futureSchedules[futureScheduleCount].time[5] = '\0';
+        futureSchedules[futureScheduleCount].actionOn = (String(doc["action"] | "off") == "on");
+        futureScheduleCount++;
+        saveFutureSchedulesToFile();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/automation/future/list", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < futureScheduleCount; i++) {
+      JsonObject s = arr.createNestedObject();
+      s["date"] = futureSchedules[i].date;
+      s["time"] = futureSchedules[i].time;
+      s["action"] = futureSchedules[i].actionOn ? "on" : "off";
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
+
+  server.on("/automation/future/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<200> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        int idx = doc["index"].as<int>();
+        if (idx >= 0 && idx < futureScheduleCount) {
+          for (int i = idx; i < futureScheduleCount - 1; i++) futureSchedules[i] = futureSchedules[i + 1];
+          futureScheduleCount--;
+          saveFutureSchedulesToFile();
+          playBeep(1);
+          request->send(200, "application/json", "{\"success\":true}");
+        } else request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid index\"}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  // User Management Routes
+  server.on("/users/list", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    StaticJsonDocument<1024> doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < userCount; i++) {
+      JsonObject u = arr.createNestedObject();
+      u["username"] = users[i].username;
+      u["password"] = users[i].password;
+      u["role"] = users[i].role;
+    }
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response); });
+
+  server.on("/users/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        String adminUser = doc["adminUser"] | "";
+        String adminPass = doc["adminPass"] | "";
+        // Verify admin credentials
+        bool isAdmin = false;
+        for (int i = 0; i < userCount; i++) {
+          if (adminUser == users[i].username && adminPass == users[i].password && strcmp(users[i].role, "admin") == 0) {
+            isAdmin = true; break;
+          }
+        }
+        if (!isAdmin) {
+          request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+          return;
+        }
+        if (userCount >= MAX_USERS) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Max users reached\"}");
+          return;
+        }
+        String username = doc["username"] | "";
+        String password = doc["password"] | "";
+        String role = doc["role"] | "user";
+        if (username.length() < 3 || password.length() < 4) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Username min 3, password min 4 chars\"}");
+          return;
+        }
+        // Check duplicate
+        for (int i = 0; i < userCount; i++) {
+          if (username == users[i].username) {
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Username already exists\"}");
+            return;
+          }
+        }
+        strncpy(users[userCount].username, username.c_str(), 19);
+        users[userCount].username[19] = '\0';
+        strncpy(users[userCount].password, password.c_str(), 19);
+        users[userCount].password[19] = '\0';
+        strncpy(users[userCount].role, role.c_str(), 9);
+        users[userCount].role[9] = '\0';
+        userCount++;
+        saveUsersToFile();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
+
+  server.on("/users/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+            {
+      StaticJsonDocument<512> doc;
+      if (!deserializeJson(doc, (const char *)data)) {
+        String adminUser = doc["adminUser"] | "";
+        String adminPass = doc["adminPass"] | "";
+        bool isAdmin = false;
+        for (int i = 0; i < userCount; i++) {
+          if (adminUser == users[i].username && adminPass == users[i].password && strcmp(users[i].role, "admin") == 0) {
+            isAdmin = true; break;
+          }
+        }
+        if (!isAdmin) {
+          request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+          return;
+        }
+        String username = doc["username"] | "";
+        // Ensure at least one admin remains
+        int adminCount = 0;
+        int deleteIdx = -1;
+        for (int i = 0; i < userCount; i++) {
+          if (strcmp(users[i].role, "admin") == 0) adminCount++;
+          if (username == users[i].username) deleteIdx = i;
+        }
+        if (deleteIdx < 0) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"User not found\"}");
+          return;
+        }
+        if (strcmp(users[deleteIdx].role, "admin") == 0 && adminCount <= 1) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Cannot delete last admin\"}");
+          return;
+        }
+        for (int i = deleteIdx; i < userCount - 1; i++) users[i] = users[i + 1];
+        userCount--;
+        saveUsersToFile();
+        playBeep(1);
+        request->send(200, "application/json", "{\"success\":true}");
+      } else request->send(400, "application/json", "{\"success\":false}"); });
 
   server.begin();
   webServerStarted = true;
@@ -2594,7 +3236,8 @@ void resetSettingsDefaults()
   delay(10);
   settings.lowHzProtec = false;
   delay(10);
-  strcpy(settings.nodeRedIP, "192.168.0.1:1880");
+  strcpy(settings.nodeRedIP, "192.168.0.1");
+  settings.nodeRedPort = 1880;
   delay(50);
 
   WiFiManager wm;
@@ -3024,7 +3667,8 @@ void loadSettings()
 
     // First time or invalid settings - set defaults
     settings.nodeRedEnabled = false;
-    strcpy(settings.nodeRedIP, "192.168.0.1:1880");
+    strcpy(settings.nodeRedIP, "192.168.0.1");
+    settings.nodeRedPort = 1880;
     settings.buzzerEnabled = true;
     settings.startupTime = 60;
     settings.mfdPerChannel = 4.0f;
@@ -3820,6 +4464,9 @@ void setup()
   u8g2.sendBuffer();
   loadSettings();
   loadFirebaseSettings();
+  loadUsersFromFile();
+  loadSchedulesFromFile();
+  loadFutureSchedulesFromFile();
   PROTECTION_DELAY = settings.protectionDelay * 1000UL;
   delay(300);
 
@@ -3935,4 +4582,7 @@ void loop()
 
   controlMainOutput();
   checkSafetyAlerts();
+  checkTimer();
+  checkSchedules();
+  checkFutureSchedules();
 }
