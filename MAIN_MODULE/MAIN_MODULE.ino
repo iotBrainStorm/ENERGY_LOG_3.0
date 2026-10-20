@@ -1,186 +1,104 @@
-// Library Includes
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
+#include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
-#include <HTTPClient.h> // Node-Red
-#include <Wire.h>       // I2C communication
+#include <HTTPClient.h>
 #include <SPI.h>
-#include <EEPROM.h>         // Settings storage
-#include <SPIFFS.h>         // File system
-#include <HardwareSerial.h> // Serial communication
-#include <RotaryEncoder.h>  // Encoder handling
-#include "time.h"           // Time management
-#include <U8g2lib.h>        // OLED display
-#include <PZEM004Tv30.h>    // Power meter
-#include <ArduinoJson.h>    // make json format
+#include <SPIFFS.h>
 #include <Preferences.h>
-#include <FirebaseESP8266.h> // For cloud share
+#include <HardwareSerial.h>
+#include <RotaryEncoder.h>
+#include <U8g2lib.h>
+#include <PZEM004Tv30.h>
+#include <ArduinoJson.h>
+#include "time.h"
 
-// Pin Definitions
-// -- Control Pins
-#define MAIN_RELAY 19 // add 10k pull up resistance to avoid flickering issue at startup
-#define PZEM_RELAY 21 // add 10k pull up resistance to avoid flickering issue at startup
-#define BUZZER_PIN 13
-#define RESET_BTN 35
+// ============================================================================
+// PIN DEFINITIONS
+// ============================================================================
+#define MAIN_RELAY 19  // Active LOW (LOW = Relay ON, HIGH = Relay OFF)
+#define PZEM_RELAY 21  // Active LOW (LOW = Sensor Powered, HIGH = Power Cut)
+#define BUZZER_PIN 13  // Active HIGH
+#define RESET_BTN 35   // External push button (HIGH when pressed)
+#define BOOT_BTN 0     // Built-in ESP32 BOOT button (LOW when pressed)
 
-// -- Web Server
-AsyncWebServer server(80);
-bool webServerStarted = false;
-
-// -- Display Refresh time
-#define DISPLAY_REFRESH_INTERVAL 1000 // ms
-
-// -- Encoder Pins
 #define ENCODER_CLK 32
 #define ENCODER_DT 33
-#define ENCODER_SW 34
+#define ENCODER_SW 34  // Active LOW (external pull-up)
 
-// Settings struct
-#define SETTINGS_VALID_FLAG 0xAB // Validation flag value
-#define SETTINGS_VERSION 1       // Increment this when you change Settings struct
-#define SETTINGS_FLAG_ADDR 0
-#define SETTINGS_VERSION_ADDR 1
-#define SETTINGS_DATA_ADDR 4
+#define ESP_COMM_TX 25   // To RX (26) of Secondary ESP32
+#define ESP_COMM_RX 26   // To TX (25) of Secondary ESP32
+#define PZEM_COMM_TX 16  // To RX of PZEM-004T
+#define PZEM_COMM_RX 17  // To TX of PZEM-004T
 
-// -- Communication Pins
-#define ESP_COMM_TX 25  // Connected to RX (26) of secondary ESP32
-#define ESP_COMM_RX 26  // Connected to TX (25) of secondary ESP32
-#define PZEM_COMM_TX 16 // Connected to RX of PZEM
-#define PZEM_COMM_RX 17 // Connected to TX of PZEM
-
-// Hardware Initialization
-HardwareSerial espSerial(1); // Use Serial1 for ESP-to-ESP communication
+// ============================================================================
+// HARDWARE INSTANCES
+// ============================================================================
+AsyncWebServer server(80);
+HardwareSerial espSerial(1);
 PZEM004Tv30 pzem(Serial2, PZEM_COMM_TX, PZEM_COMM_RX);
-
-// -- Second Core
-TaskHandle_t firebaseTask;
-
-// -- Display
-// U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
-U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, 18, 23, 5, 22); // E=18, RW=23, RS=5, RST=22, PSB=GND
-
-// -- Welcome Message
-const char MSG_WELCOME[] PROGMEM = "ESP";
-const char MSG_SUBTITLE[] PROGMEM = "ENERGY - LOG";
-const char MSG_DEVELOPER[] PROGMEM = "developed by M.Maity";
-
-// -- Time Management
-const char *ntpServer = "pool.ntp.org";
-long gmtOffset_sec = 19800;
-const int daylightOffset_sec = 0;
-
-// -- Days Tracking
-Preferences preferences;
-float kwhDays = 0.0;
-const unsigned long TOTAL_DAYS_INTERVAL = 10UL * 60UL * 1000UL; // 10 minutes in ms
-bool resetDaysRequested = false;
-
-unsigned long lastTotalDaysUpdate = 0;
-unsigned long deviceStartMillis = 0;
-
-// -- Encoder
+U8G2_ST7920_128X64_F_SW_SPI u8g2(U8G2_R0, 18, 23, 5, 22);  // E=18, RW=23, RS=5, RST=22
 RotaryEncoder encoder(ENCODER_CLK, ENCODER_DT);
+Preferences preferences;
+
 portMUX_TYPE encoderMux = portMUX_INITIALIZER_UNLOCKED;
-volatile int encoderValue = 0;
-long lastEncoderPos = 0;
-
-// Global Variables
-// -- Menu State
-int menuLevel = 0;
-int menuIndex[3] = {0, 0, 0};
-bool editing = false;
-bool menuActive = false;
-
-// -- PZEM Measurements
-struct Measurements
-{
-  float voltage;
-  float current;
-  float power;
-  float energy;
-  float frequency;
-  float pf;
-  float uptime;
-  float totalDays;
-
-  // Constructor with default values
-  Measurements()
-      : voltage(000.0),
-        current(0.00),
-        power(0.0),
-        energy(0.00),
-        frequency(00.00),
-        pf(0.00),
-        uptime(0.0),
-        totalDays(0.0) {}
-};
 portMUX_TYPE measureMux = portMUX_INITIALIZER_UNLOCKED;
-Measurements readings;
 
-// -- PZEM Read
-bool resetKwhRequested = false;
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
+struct Measurements {
+  float voltage = 0.0f;
+  float current = 0.0f;
+  float power = 0.0f;
+  float energy = 0.0f;
+  float frequency = 0.0f;
+  float pf = 0.0f;
+  float uptime = 0.0f;
+  float totalDays = 0.0f;
+  bool valid = false;
+};
 
-// -- Node-Red
-bool nodeRedConnected = false;
-String lastNodeRedResponse = "";
+#define SETTINGS_MAGIC 0xE304
+struct Settings {
+  uint16_t magic;
 
-// -- Safety Alert Check
-const int ALERT_BEEP_DURATION = 100; // Beep duration in ms
-const int ALERT_BEEP_PAUSE = 100;    // Pause between beeps
-
-// -- Safety protection
-bool shouldTurnOff = false;
-static bool protectionWasActive = false;
-static unsigned long protectionClearedTime = 0;
-unsigned long PROTECTION_DELAY = 12e5; // 20 minutes in milliseconds
-
-// -- ESP Data Share
-unsigned long lastSendEspUpdate = 0;
-const unsigned long SEND_ESP_INTERVAL = 1500;
-
-// -- WiFi Status
-uint8_t wifiRSSI = 0;
-String ssid = "";
-
-// Settings Structure
-struct __attribute__((packed)) Settings
-{
-  // Communication Settings
+  // Connectivity
   bool nodeRedEnabled;
   char nodeRedIP[32];
-  int nodeRedPort;
+  bool mdnsEnabled;
+  char mdnsHostname[32];
+  long gmtOffset;
 
-  // Protection Settings
+  // Alerts
   bool highVoltageAlert, lowVoltageAlert;
   bool highPowerAlert, lowPowerAlert;
   bool highFreqAlert, lowFreqAlert;
+
+  // Protections
   bool highVProtec, LowVProtec;
   bool highPProtec;
   bool highHzProtec, lowHzProtec;
 
-  // Feature Settings
+  // Features
   bool afpcEnabled;
-  bool mainOutput, kWhSaver;
+  bool mainOutput;
+  bool kWhSaver;
   bool buzzerEnabled;
 
-  // Threshold Values
+  // Thresholds
   float voltHigh, voltLow;
   float powerHigh, powerLow;
   float freqHigh, freqLow;
   float targetFactor;
-
-  // System Settings
-  int startupTime;
   float mfdPerChannel;
   int maxkWh;
-  float totalDays;
-
-  // AFPC thresholds
   int afpcLowWatt;
   int afpcHighWatt;
 
-  // Update intervals (in milliseconds)
+  // Timing & Intervals (seconds)
+  int startupTime;
   int espShareInterval;
   int nodeRedInterval;
   int pzemInterval;
@@ -188,1080 +106,964 @@ struct __attribute__((packed)) Settings
   int protectionDelay;
 };
 
-Settings settings;
-const int EEPROM_ADDR = 0;
-
-// Firebase Settings structure
-struct __attribute__((packed)) FirebaseSettings
-{
-  bool enabled;
-  char host[128];    // Firebase project URL
-  char auth[128];    // Database secret/auth token
-  int dataInterval;  // Data share interval in seconds
-  uint8_t validFlag; // Validation flag
+struct UserAccount {
+  bool active;
+  char username[20];
+  char password[20];
+  char role[10];  // "admin" or "user"
 };
 
-FirebaseSettings fbSettings;
-const int FB_EEPROM_ADDR = sizeof(Settings) + 10; // Offset after main settings
+struct DailySchedule {
+  bool active;
+  uint8_t hour;
+  uint8_t minute;
+  bool turnOn;
+  uint8_t daysMask;  // Bit 0 = Mon ... Bit 6 = Sun
+  int lastTriggeredYDay;
+};
 
-// Firebase status variables
-FirebaseData firebaseData;
-FirebaseAuth auth;
-FirebaseConfig config;
-String firebaseStatus = "";
-bool firebaseConnected = false;
-bool fbCredentialsSaved = false;
-bool fbTestPending = false;
-String lastFirebaseResponse = "";
-unsigned long lastFirebaseSend = 0;
+struct FutureSchedule {
+  bool active;
+  uint16_t year;
+  uint8_t month;
+  uint8_t day;
+  uint8_t hour;
+  uint8_t minute;
+  bool turnOn;
+};
 
-const char *mainMenu[] = {
-    "Back",           // 0
-    "WiFi Setup",     // 1
-    "Node-Red",       // 2
-    "Cloud Share",    // 3
-    "AFPC",           // 4
-    "Startup",        // 5
-    "Interval",       // 6
-    "Thresholds",     // 7
-    "Safety Alert",   // 8
-    "Safety Protec.", // 9
-    "Main Output",    // 10
-    "Update Time",    // 11
-    "Clear Data",     // 12
-    "Factory Reset",  // 13
-    "Restart",        // 14
-    "About"           // 15
+#define MAX_USERS 6
+#define MAX_DAILY_SCHEDULES 8
+#define MAX_FUTURE_SCHEDULES 8
+
+Measurements readings;
+Settings settings;
+UserAccount users[MAX_USERS];
+DailySchedule dailySchedules[MAX_DAILY_SCHEDULES];
+FutureSchedule futureSchedules[MAX_FUTURE_SCHEDULES];
+
+// ============================================================================
+// RUNTIME STATE VARIABLES
+// ============================================================================
+float kwhDays = 0.0f;
+unsigned long lastResetEpoch = 0;         // ADD: Epoch timestamp (seconds) of last reset
+char lastResetTimeStr[24] = "Not Reset";  // ADD: Formatted timestamp string for Web UI
+const char* ntpServer = "pool.ntp.org";
+bool ntpSynced = false;
+unsigned long lastNtpSyncMillis = 0;
+
+// Relay & Protection States
+bool relayPhysicalOn = false;
+bool shouldTurnOff = false;
+bool protectionWasActive = false;
+bool waitingForDelay = false;
+unsigned long protectionClearedTime = 0;
+char protectionStatusText[16] = "MAIN: ON";
+
+// Quick Countdown Timer (Volatile)
+bool quickTimerActive = false;
+unsigned long quickTimerEndMillis = 0;
+
+// Deferred Action Flags (Safe execution outside AsyncWebServer callbacks)
+volatile bool pendingRestart = false;
+unsigned long restartScheduledMillis = 0;
+volatile bool pendingWiFiDisconnect = false;
+volatile bool pendingWiFiForget = false;
+volatile bool pendingWiFiPortal = false;
+volatile bool pendingNtpSync = false;
+volatile bool pendingMdnsRestart = false;
+volatile bool resetKwhRequested = false;
+volatile bool resetDaysRequested = false;
+volatile bool pendingFactoryData = false;
+volatile bool pendingFactoryAll = false;
+
+// Node-RED Status
+bool nodeRedConnected = false;
+String lastNodeRedResponse = "---";
+
+// Non-Blocking Buzzer State Machine
+struct BuzzerState {
+  bool active = false;
+  bool pinHigh = false;
+  int remainingBeeps = 0;
+  unsigned long onDuration = 100;
+  unsigned long offPause = 100;
+  unsigned long lastTransition = 0;
+} buzzer;
+
+// PZEM Auto-Recovery State
+uint8_t pzemFailCount = 0;
+bool pzemPowerCycling = false;
+unsigned long pzemRelayOffMillis = 0;
+
+// Encoder & Button State
+volatile long isrEncoderPos = 0;
+long lastEncoderPos = 0;
+unsigned long lastMenuActivityMillis = 0;
+const unsigned long MENU_TIMEOUT_MS = 60000UL;
+
+// Boot Button 5-Second Factory Reset State
+bool bootBtnHolding = false;
+unsigned long bootBtnPressStart = 0;
+int lastBootCountdownSec = -1;
+
+// Startup Safety Check State Machine
+bool startupCheckCompleted = false;
+int startupRemainingSec = 0;
+unsigned long lastStartupTickMillis = 0;
+
+// ============================================================================
+// LCD MENU DEFINITIONS (Cleaned up, Firebase removed, mDNS added)
+// ============================================================================
+enum UIState {
+  UI_STARTUP_SAFETY,
+  UI_DASHBOARD,
+  UI_MAIN_MENU,
+  UI_SUB_MENU,
+  UI_EDIT_INT,
+  UI_EDIT_FLOAT,
+  UI_CONFIRM,
+  UI_INFO_VIEW,
+  UI_TOAST
+};
+
+UIState uiState = UI_STARTUP_SAFETY;
+UIState uiReturnState = UI_DASHBOARD;
+
+const char* mainMenu[] = {
+  "Back",            // 0
+  "WiFi Setup",      // 1
+  "mDNS Address",    // 2
+  "Node-RED",        // 3
+  "AFPC Control",    // 4
+  "Startup Delay",   // 5
+  "Intervals",       // 6
+  "Thresholds",      // 7
+  "Safety Alerts",   // 8
+  "Safety Protec.",  // 9
+  "Main Output",     // 10
+  "Update Time",     // 11
+  "Clear Data",      // 12
+  "Factory Reset",   // 13
+  "Restart Device",  // 14
+  "About"            // 15
 };
 const int mainMenuCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
-// Sub Menu Items
-const char *wifiSetupSubmenu[] = {"Back", "Connect WiFi", "WiFi Status", "Disconnect", "Forget Wifi"};
-const char *nodeRedSubmenu[] = {"Back", "Enable/Disable", "IP Address", "Port", "Status"};
-const char *firebaseSubmenu[] = {"Back", "Enable/Disable", "Credentials Setup", "Upload Interval", "Test Connection", "Forget Credentials", "Status"};
-const char *afpcSubmenu[] = {"Back", "Enable/Disable", "Target PF", "MFD Per Channel"};
-const char *startupSubmenu[] = {"Back", "Delay Time"};
-const char *safetyAlertSubmenu[] = {"Back", "High Voltage", "Low Voltage", "High Power", "Low Power", "Under Freq.", "Over Freq."};
-const char *safetyProtectionSubmenu[] = {"Back", "High V Protection", "Low V Protection", "High P Protection", "High Hz Protection", "Low Hz Protection"};
-const char *thresholdSubmenu[] = {"Back", "Voltage High", "Voltage Low", "Power High", "Power Low", "Freq. High", "Freq. Low", "Max kWh", "AFPC Low Watt", "AFPC High Watt"};
-const char *clearDataSubmenu[] = {"Back", "Clear kWh", "Clear Days"};
-const char *mainOutputSubmenu[] = {"Back", "Enable/Disable", "kWh Saver"};
-const char *factoryResetSubmenu[] = {"Back", "Reset Data", "Reset Settings"};
-const char *updateIntervalSubmenu[] = {"Back", "ESP Sharing", "Node-Red Update", "Sensor Update", "Safety Alert", "Protection Delay"};
+const char* wifiSetupSubmenu[] = { "Back", "Connect Portal", "WiFi Status", "Disconnect", "Forget WiFi" };
+const char* mdnsSubmenu[] = { "Back", "Enable/Disable", "Reset Default", "View Hostname" };
+const char* nodeRedSubmenu[] = { "Back", "Enable/Disable", "Status" };
+const char* afpcSubmenu[] = { "Back", "Enable/Disable", "Target PF", "MFD / Channel" };
+const char* startupSubmenu[] = { "Back", "Delay Time" };
+const char* updateIntervalSubmenu[] = { "Back", "ESP Sharing", "Node-RED", "Sensor Read", "Safety Alert", "Protec. Delay" };
+const char* thresholdSubmenu[] = { "Back", "Voltage High", "Voltage Low", "Power High", "Power Low", "Freq. High", "Freq. Low", "Max kWh", "AFPC Low W", "AFPC High W" };
+const char* safetyAlertSubmenu[] = { "Back", "High Voltage", "Low Voltage", "High Power", "Low Power", "Under Freq.", "Over Freq." };
+const char* safetyProtectionSubmenu[] = { "Back", "High V Protec", "Low V Protec", "High P Protec", "High Hz Protec", "Low Hz Protec" };
+const char* mainOutputSubmenu[] = { "Back", "Enable/Disable", "kWh Saver" };
+const char* clearDataSubmenu[] = { "Back", "Clear kWh", "Last Billing" };
+const char* factoryResetSubmenu[] = { "Back", "Reset Data", "Reset Settings" };
 
-// Timer
-unsigned long timerEndMillis = 0;
-bool timerActive = false;
+int currentMainMenuIdx = 0;
+int currentSubMenuIdx = 0;
+const char** activeSubmenuPtr = nullptr;
+int activeSubmenuLen = 0;
 
-// Schedules (max 10)
-#define MAX_SCHEDULES 10
-struct Schedule
-{
-  char time[6];
-  bool actionOn;
-  uint8_t days[7];
-  uint8_t dayCount;
-};
-Schedule schedules[MAX_SCHEDULES];
-int scheduleCount = 0;
+// Non-blocking Editor Context
+struct EditContext {
+  const char* title;
+  int* intTarget;
+  float* floatTarget;
+  int intTemp, intMin, intMax, intStep;
+  float floatTemp, floatMin, floatMax, floatScale;
+  char unit;
+  bool confirmChoice;
+  void (*onConfirm)();
+} editCtx;
 
-// Future Schedules (max 10)
-#define MAX_FUTURE_SCHEDULES 10
-struct FutureSchedule
-{
-  char date[11];
-  char time[6];
-  bool actionOn;
-};
-FutureSchedule futureSchedules[MAX_FUTURE_SCHEDULES];
-int futureScheduleCount = 0;
+// Toast / Info View Context
+char toastMsgLine1[24] = "";
+char toastMsgLine2[24] = "";
+char infoLine1[24] = "";
+char infoLine2[24] = "";
+char infoLine3[24] = "";
+char infoLine4[24] = "";
+unsigned long toastEndMillis = 0;
 
-// Users (max 5)
-#define MAX_USERS 5
-struct User
-{
-  char username[20];
-  char password[20];
-  char role[10];
-};
-User users[MAX_USERS];
-int userCount = 0;
-
-// 1. Basic Utility Functions
-void playBeep(int duration)
-{
-  //  if (!settings.buzzerEnabled) return;
-
-  digitalWrite(BUZZER_PIN, HIGH); // Turn buzzer ON
-  delay(duration);                // Keep ON for duration
-  digitalWrite(BUZZER_PIN, LOW);  // Turn buzzer OFF
-}
-void showMessage(const char *msg, int delay_ms = 1000)
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 24, msg);
-  u8g2.sendBuffer();
-  delay(delay_ms);
-}
-void welcomeMsg()
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB18_tr);
-  u8g2.drawStr(0, 22, MSG_WELCOME);
-  u8g2.setFont(u8g2_font_ncenR12_tr);
-  u8g2.drawStr(0, 40, MSG_SUBTITLE);
-  u8g2.setFont(u8g2_font_t0_11_tr);
-  u8g2.drawStr(2, 60, MSG_DEVELOPER);
-  u8g2.sendBuffer();
+// ============================================================================
+// UTILITY & NON-BLOCKING BUZZER FUNCTIONS
+// ============================================================================
+void triggerBeep(unsigned long durationMs, int count = 1, unsigned long pauseMs = 80) {
+  if (!settings.buzzerEnabled && count == 1 && durationMs < 100) return;
+  buzzer.onDuration = durationMs;
+  buzzer.offPause = pauseMs;
+  buzzer.remainingBeeps = count;
+  buzzer.active = true;
+  buzzer.pinHigh = true;
+  buzzer.lastTransition = millis();
+  digitalWrite(BUZZER_PIN, HIGH);
 }
 
-// 2. Input/Encoder Functions
-bool buttonPressed()
-{
-  if (digitalRead(ENCODER_SW) == LOW)
-  {
-    delay(200);
-    while (digitalRead(ENCODER_SW) == LOW)
-      ;
-    return true;
+void updateBuzzer() {
+  if (!buzzer.active) return;
+  unsigned long now = millis();
+  if (buzzer.pinHigh) {
+    if (now - buzzer.lastTransition >= buzzer.onDuration) {
+      digitalWrite(BUZZER_PIN, LOW);
+      buzzer.pinHigh = false;
+      buzzer.lastTransition = now;
+      buzzer.remainingBeeps--;
+      if (buzzer.remainingBeeps <= 0) {
+        buzzer.active = false;
+      }
+    }
+  } else {
+    if (now - buzzer.lastTransition >= buzzer.offPause) {
+      digitalWrite(BUZZER_PIN, HIGH);
+      buzzer.pinHigh = true;
+      buzzer.lastTransition = now;
+    }
   }
-  return false;
 }
-void IRAM_ATTR encoderISR()
-{
+
+void showToastLCD(const char* l1, const char* l2 = "", unsigned long durationMs = 1200, UIState nextState = UI_MAIN_MENU) {
+  strncpy(toastMsgLine1, l1, sizeof(toastMsgLine1) - 1);
+  strncpy(toastMsgLine2, l2, sizeof(toastMsgLine2) - 1);
+  toastEndMillis = millis() + durationMs;
+  uiReturnState = nextState;
+  uiState = UI_TOAST;
+}
+
+String getMacSuffix() {
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  mac.toUpperCase();
+  if (mac.length() >= 4) return mac.substring(mac.length() - 4);
+  return "0000";
+}
+
+String getDefaultMdnsName() {
+  return "energylog-" + getMacSuffix();
+}
+
+void setupMDNS() {
+  MDNS.end();
+  if (!settings.mdnsEnabled || WiFi.status() != WL_CONNECTED) return;
+  String host = String(settings.mdnsHostname);
+  host.trim();
+  if (host.length() == 0) host = getDefaultMdnsName();
+  if (MDNS.begin(host.c_str())) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("[mDNS] Responder started: http://%s.local\n", host.c_str());
+  }
+}
+
+// ============================================================================
+// ENCODER & BUTTON HANDLING (NON-BLOCKING)
+// ============================================================================
+void IRAM_ATTR encoderISR() {
   portENTER_CRITICAL_ISR(&encoderMux);
   encoder.tick();
-  encoderValue = encoder.getPosition();
+  isrEncoderPos = encoder.getPosition();
   portEXIT_CRITICAL_ISR(&encoderMux);
 }
 
-// 9. Display functions
-void clearLCD(const long x, uint8_t y, uint8_t wid, uint8_t hig)
-{
-  /*  box wid is right x, box height is below y
-      where font wid is right x, font height is upper y
-  */
-  u8g2.setDrawColor(0);
-  u8g2.drawBox(x, y, wid, hig);
-  u8g2.setDrawColor(1);
+long getEncoderPos() {
+  portENTER_CRITICAL(&encoderMux);
+  encoder.tick();
+  long p = encoder.getPosition();
+  portEXIT_CRITICAL(&encoderMux);
+  return p;
 }
 
-void displayLayout()
-{
-  u8g2.clearBuffer();
-  u8g2.drawFrame(0, 0, 128, 64);
-  u8g2.drawLine(54, 1, 54, 62);
-  u8g2.drawLine(1, 39, 126, 39);
-  u8g2.sendBuffer();
+void setEncoderPos(long p) {
+  portENTER_CRITICAL(&encoderMux);
+  encoder.setPosition(p);
+  isrEncoderPos = p;
+  lastEncoderPos = p;
+  portEXIT_CRITICAL(&encoderMux);
 }
 
-void displayUnits()
-{
-  u8g2.setFont(u8g2_font_t0_11_tr);
-  u8g2.drawStr(46, 12, "V");
-  u8g2.drawStr(113, 12, "PF");
-  u8g2.drawStr(46, 24, "A");
-  u8g2.drawStr(118, 24, "W");
-  u8g2.drawStr(40, 36, "Hz");
-  u8g2.drawStr(107, 36, "kWh");
-  u8g2.drawStr(46, 50, "H");
-  u8g2.drawStr(46, 61, "D");
-  u8g2.sendBuffer();
+bool checkEncoderButtonClick() {
+  static bool lastState = HIGH;
+  static unsigned long pressedTime = 0;
+  static bool clickConsumed = false;
+
+  bool current = digitalRead(ENCODER_SW);
+  unsigned long now = millis();
+
+  if (current == LOW && lastState == HIGH) {
+    pressedTime = now;
+    clickConsumed = false;
+  } else if (current == LOW && !clickConsumed && (now - pressedTime >= 45)) {
+    clickConsumed = true;
+    lastState = current;
+    lastMenuActivityMillis = now;
+    return true;
+  }
+  lastState = current;
+  return false;
 }
 
-void displayStatusbar()
-{
-  u8g2.setFont(u8g2_font_t0_11_tr);
+// ============================================================================
+// STORAGE: SETTINGS, USERS, SCHEDULES (PREFERENCES NVS)
+// ============================================================================
+void applyDefaultSettings() {
+  settings.magic = SETTINGS_MAGIC;
+  settings.nodeRedEnabled = false;
+  strcpy(settings.nodeRedIP, "192.168.1.100:1880");
+  settings.mdnsEnabled = true;
+  strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+  settings.mdnsHostname[31] = '\0';
+  settings.gmtOffset = 19800;  // IST UTC+5:30
 
-  // ✅ WiFi Status
-  clearLCD(58, 52, 9, 9);
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    u8g2.drawStr(59, 61, "W");
-  }
+  settings.highVoltageAlert = false;
+  settings.lowVoltageAlert = false;
+  settings.highPowerAlert = false;
+  settings.lowPowerAlert = false;
+  settings.highFreqAlert = false;
+  settings.lowFreqAlert = false;
 
-  // Node-Red Status
-  clearLCD(70, 52, 9, 9);
-  if (settings.nodeRedEnabled)
-  {
-    u8g2.drawStr(72, 61, "R");
-  }
+  settings.highVProtec = false;
+  settings.LowVProtec = false;
+  settings.highPProtec = false;
+  settings.highHzProtec = false;
+  settings.lowHzProtec = false;
 
-  // Firebase Status
-  clearLCD(86, 52, 12, 9);
-  if (fbSettings.enabled)
-  {
-    u8g2.drawStr(85, 61, "FB");
-  }
+  settings.afpcEnabled = false;
+  settings.mainOutput = true;
+  settings.kWhSaver = false;
+  settings.buzzerEnabled = true;
 
-  // Protection Status
-  clearLCD(103, 52, 9, 9);
-  if (settings.highVProtec || settings.LowVProtec || settings.highPProtec || settings.highHzProtec || settings.lowHzProtec)
-  {
-    u8g2.drawStr(105, 61, "P");
-  }
+  settings.voltHigh = 250.0f;
+  settings.voltLow = 180.0f;
+  settings.powerHigh = 3000.0f;
+  settings.powerLow = 100.0f;
+  settings.freqHigh = 50.50f;
+  settings.freqLow = 49.50f;
+  settings.targetFactor = 0.90f;
+  settings.mfdPerChannel = 4.0f;
+  settings.maxkWh = 100;
+  settings.afpcLowWatt = 50;
+  settings.afpcHighWatt = 3000;
 
-  // Alert Status
-  clearLCD(117, 52, 9, 9);
-  if (settings.highVoltageAlert || settings.lowVoltageAlert || settings.highPowerAlert || settings.lowPowerAlert || settings.highFreqAlert || settings.lowFreqAlert)
-  {
-    u8g2.drawStr(119, 61, "A");
-  }
-
-  // ✅ IMPORTANT: Send buffer after drawing all status icons
-  u8g2.sendBuffer();
+  settings.startupTime = 15;
+  settings.espShareInterval = 2;
+  settings.nodeRedInterval = 5;
+  settings.pzemInterval = 1;
+  settings.alertInterval = 15;
+  settings.protectionDelay = 1200;
 }
 
-bool connectToSavedWiFi()
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "Connecting WiFi...");
-  u8g2.sendBuffer();
+void saveSettings() {
+  settings.magic = SETTINGS_MAGIC;
+  preferences.putBytes("cfg", &settings, sizeof(Settings));
+}
 
-  WiFiManager wm;
-  bool success = false;
+void loadSettings() {
+  if (preferences.getBytesLength("cfg") == sizeof(Settings)) {
+    preferences.getBytes("cfg", &settings, sizeof(Settings));
+    if (settings.magic != SETTINGS_MAGIC) {
+      applyDefaultSettings();
+      saveSettings();
+    }
+  } else {
+    applyDefaultSettings();
+    saveSettings();
+  }
+  if (strlen(settings.mdnsHostname) == 0) {
+    strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+  }
+  if (settings.startupTime < 5) {
+    settings.startupTime = 15;  // Ensure startup safety check always runs
+  }
+}
 
-  // ✅ Always set WiFi mode and begin - even if no saved credentials
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(); // This initializes WiFi stack
+void saveUsers() {
+  preferences.putBytes("users", users, sizeof(users));
+}
 
-  int attempts = 0;
-  const int MAX_ATTEMPTS = 5;
+void loadUsers() {
+  if (preferences.getBytesLength("users") == sizeof(users)) {
+    preferences.getBytes("users", users, sizeof(users));
+  } else {
+    memset(users, 0, sizeof(users));
+    users[0].active = true;
+    strcpy(users[0].username, "esp");
+    strcpy(users[0].password, "456456");
+    strcpy(users[0].role, "admin");
+    saveUsers();
+  }
+}
 
-  while (attempts < MAX_ATTEMPTS)
-  {
-    char attemptStr[16];
-    snprintf(attemptStr, 16, "Attempt: %d/5", attempts + 1);
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Connecting WiFi...");
-    u8g2.drawStr(0, 24, attemptStr);
-    u8g2.sendBuffer();
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      // Success - show connection details
-      u8g2.clearBuffer();
-      u8g2.drawStr(0, 12, "WiFi Connected!");
-      u8g2.drawStr(0, 24, "SSID:");
-      u8g2.drawStr(0, 36, WiFi.SSID().c_str());
-      u8g2.drawStr(0, 48, "IP:");
-      u8g2.drawStr(0, 60, WiFi.localIP().toString().c_str());
-      u8g2.sendBuffer();
-      delay(2000);
+bool verifyAdminCreds(const String& u, const String& p) {
+  for (int i = 0; i < MAX_USERS; i++) {
+    if (users[i].active && u == users[i].username && p == users[i].password && String(users[i].role) == "admin") {
       return true;
     }
-
-    delay(2000);
-    attempts++;
   }
+  return false;
+}
 
-  // ✅ Don't show AP portal during startup - just note WiFi not available
+void saveSchedulesToNVS() {
+  preferences.putBytes("dsched", dailySchedules, sizeof(dailySchedules));
+  preferences.putBytes("fsched", futureSchedules, sizeof(futureSchedules));
+}
+
+void loadSchedulesFromNVS() {
+  if (preferences.getBytesLength("dsched") == sizeof(dailySchedules)) {
+    preferences.getBytes("dsched", dailySchedules, sizeof(dailySchedules));
+  } else {
+    memset(dailySchedules, 0, sizeof(dailySchedules));
+  }
+  if (preferences.getBytesLength("fsched") == sizeof(futureSchedules)) {
+    preferences.getBytes("fsched", futureSchedules, sizeof(futureSchedules));
+  } else {
+    memset(futureSchedules, 0, sizeof(futureSchedules));
+  }
+}
+
+// Record current NTP timestamp to NVS when Energy/Billing is reset
+bool recordEnergyResetTimestamp() {
+  struct tm ti;
+  if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
+    return false;
+  }
+  time_t nowEpoch;
+  time(&nowEpoch);
+  lastResetEpoch = (unsigned long)nowEpoch;
+  strftime(lastResetTimeStr, sizeof(lastResetTimeStr), "%d/%m/%y %H:%M", &ti);
+
+  preferences.putULong("rstEpoch", lastResetEpoch);
+  preferences.putString("rstTime", lastResetTimeStr);
+  kwhDays = 0.0f;
+  return true;
+}
+
+// ============================================================================
+// 5-SECOND BOOT BUTTON FACTORY RESET
+// ============================================================================
+void executeFullFactoryReset() {
   u8g2.clearBuffer();
-  u8g2.drawStr(0, 12, "No WiFi Found");
-  u8g2.drawStr(0, 24, "Will auto-connect");
-  u8g2.drawStr(0, 36, "when available");
-  u8g2.drawStr(0, 48, "or use menu");
+  u8g2.setFont(u8g2_font_7x14B_tr);
+  u8g2.drawStr(10, 28, "FACTORY RESET!");
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(14, 46, "Formatting NVS...");
   u8g2.sendBuffer();
-  delay(2000);
 
-  return false; // ✅ Return false but WiFi stack is initialized
+  digitalWrite(MAIN_RELAY, HIGH);  // Safe state: Relay OFF
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(800);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  preferences.clear();
+  applyDefaultSettings();
+  saveSettings();
+  kwhDays = 0.0f;
+  lastResetEpoch = 0;
+  strcpy(lastResetTimeStr, "Not Reset");
+
+  WiFi.disconnect(true, true);
+  ESP.restart();
 }
 
-void performSafetyCheck()
-{
-  int remainingTime = settings.startupTime;
-  int totalTime = settings.startupTime;
-  bool safeToStart = true;
-  bool manualOverride = false;
-
-  // Bar parameters
-  const int barMaxWidth = 120; // Maximum width of progress bar
-  const int barHeight = 6;     // Height of progress bar
-  const int barX = 4;          // X position of bar
-  const int barY = 40;         // Y position of bar
-
-  while (remainingTime > 0 || !safeToStart)
-  {
-    // Get real-time measurements
-    portENTER_CRITICAL(&measureMux);
-    readings.voltage = pzem.voltage();     // Test value
-    readings.frequency = pzem.frequency(); // Test value
-    portEXIT_CRITICAL(&measureMux);
-    delay(100);
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-
-    if (!isnan(readings.voltage))
-    {
-
-      // Display voltage at top right with status
-      char voltStr[10];
-      dtostrf(readings.voltage, 6, 2, voltStr);
-      u8g2.drawStr(62, 9, voltStr);
-      u8g2.drawStr(100, 9, "V");
-
-      if (readings.voltage > settings.voltHigh)
-      {
-        u8g2.drawStr(0, 9, "high V");
-        safeToStart = false;
-      }
-      else if (readings.voltage < settings.voltLow)
-      {
-        u8g2.drawStr(0, 9, "low V");
-        safeToStart = false;
-      }
-      else
-      {
-        u8g2.drawStr(0, 9, "normal");
-      }
-
-      // Display frequency at right with status
-      char freqStr[10];
-      dtostrf(readings.frequency, 5, 2, freqStr);
-      u8g2.drawStr(62, 23, freqStr);
-      u8g2.drawStr(100, 23, "Hz");
-
-      if (readings.frequency > settings.freqHigh)
-      {
-        u8g2.drawStr(0, 23, "high fre.");
-        safeToStart = false;
-      }
-      else if (readings.frequency < settings.freqLow)
-      {
-        u8g2.drawStr(0, 23, "undr fre.");
-        safeToStart = false;
-      }
-      else
-      {
-        u8g2.drawStr(0, 23, "normal");
-      }
-
-      // Show countdown or override message at bottom
-      if (!safeToStart)
-      {
-        u8g2.drawStr(0, 60, "press push to turn on!");
-        if (digitalRead(RESET_BTN) == HIGH)
-        {
-          manualOverride = true;
-          break;
+void checkBootFactoryReset() {
+  if (digitalRead(BOOT_BTN) == LOW) {
+    unsigned long now = millis();
+    if (!bootBtnHolding) {
+      bootBtnHolding = true;
+      bootBtnPressStart = now;
+      lastBootCountdownSec = -1;
+    } else {
+      unsigned long elapsed = now - bootBtnPressStart;
+      if (elapsed >= 5000UL) {
+        executeFullFactoryReset();
+      } else if (elapsed >= 500UL) {
+        int remSec = 5 - (elapsed / 1000UL);
+        if (remSec != lastBootCountdownSec) {
+          lastBootCountdownSec = remSec;
+          triggerBeep(60, 1, 0);
         }
       }
-      else
-      {
-
-        // Draw progress bar
-        int barWidth = map(totalTime - remainingTime, 0, totalTime, 0, barMaxWidth);
-
-        // Draw bar frame
-        u8g2.drawFrame(barX, barY, barMaxWidth, barHeight);
-
-        // Draw filled portion
-        if (barWidth > 0)
-        {
-          u8g2.drawBox(barX, barY, barWidth, barHeight);
-        }
-
-        u8g2.drawStr(4, 60, "wait for...");
-        char timeStr[8];
-        sprintf(timeStr, "%d s", remainingTime);
-        u8g2.drawStr(80, 60, timeStr);
-        remainingTime--;
-      }
-
-      u8g2.sendBuffer();
-
-      if (digitalRead(RESET_BTN) == HIGH)
-      {
-        manualOverride = true;
-        break;
-      }
-
-      delay(1000);
     }
-
-    // Reset safety flag if values return to normal
-    if (readings.voltage >= settings.voltLow && readings.voltage <= settings.voltHigh && readings.frequency >= settings.freqLow && readings.frequency <= settings.freqHigh)
-    {
-      safeToStart = true;
-    }
-  }
-
-  // If startup successful or manually overridden
-  if (safeToStart || manualOverride)
-  {
-    u8g2.clearBuffer();
-    u8g2.drawStr(31, 35, "Starting...");
-    u8g2.sendBuffer();
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(1500);
-    digitalWrite(BUZZER_PIN, LOW);
-    delay(1000);
+  } else {
+    bootBtnHolding = false;
+    lastBootCountdownSec = -1;
   }
 }
 
-// 9. Main Output
-void controlMainOutput()
-{
+// ============================================================================
+// SILENT BACKGROUND NTP & AUTOMATION SCHEDULER
+// ============================================================================
+void updateNtpSilently() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  unsigned long now = millis();
+  if (pendingNtpSync || !ntpSynced || (now - lastNtpSyncMillis >= 3600000UL)) {
+    if (pendingNtpSync || lastNtpSyncMillis == 0 || (now - lastNtpSyncMillis >= 30000UL)) {
+      configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov");
+      lastNtpSyncMillis = now;
+      pendingNtpSync = false;
+    }
+  }
+
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo, 0)) {
+    if (timeinfo.tm_year + 1900 >= 2024) {
+      ntpSynced = true;
+    }
+  }
+}
+
+void checkTimersAndSchedules() {
+  // 1. Volatile Quick Countdown Timer
+  if (quickTimerActive) {
+    if ((long)(millis() - quickTimerEndMillis) >= 0) {
+      quickTimerActive = false;
+      settings.mainOutput = false;
+      saveSettings();
+      triggerBeep(200, 2, 100);
+    }
+  }
+
+  // 2. Persistent Daily & Future Schedules (checked once per second when NTP time is valid)
+  static unsigned long lastSchedCheck = 0;
+  if (millis() - lastSchedCheck < 1000UL) return;
+  lastSchedCheck = millis();
+
+  struct tm ti;
+  if (!getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) return;
+
+  // Map tm_wday (0=Sun..6=Sat) to UI index (0=Mon..6=Sun)
+  int uiDay = (ti.tm_wday == 0) ? 6 : (ti.tm_wday - 1);
+
+  for (int i = 0; i < MAX_DAILY_SCHEDULES; i++) {
+    if (dailySchedules[i].active && (dailySchedules[i].daysMask & (1 << uiDay)) && dailySchedules[i].hour == ti.tm_hour && dailySchedules[i].minute == ti.tm_min && dailySchedules[i].lastTriggeredYDay != ti.tm_yday) {
+      dailySchedules[i].lastTriggeredYDay = ti.tm_yday;
+      settings.mainOutput = dailySchedules[i].turnOn;
+      if (settings.mainOutput) {
+        protectionWasActive = false;
+        waitingForDelay = false;
+      }
+      saveSettings();
+      saveSchedulesToNVS();
+      triggerBeep(120, 2, 80);
+    }
+  }
+
+  bool futureChanged = false;
+  for (int i = 0; i < MAX_FUTURE_SCHEDULES; i++) {
+    if (futureSchedules[i].active && futureSchedules[i].year == (ti.tm_year + 1900) && futureSchedules[i].month == (ti.tm_mon + 1) && futureSchedules[i].day == ti.tm_mday && futureSchedules[i].hour == ti.tm_hour && futureSchedules[i].minute == ti.tm_min) {
+      settings.mainOutput = futureSchedules[i].turnOn;
+      if (settings.mainOutput) {
+        protectionWasActive = false;
+        waitingForDelay = false;
+      }
+      futureSchedules[i].active = false;
+      futureChanged = true;
+      saveSettings();
+      triggerBeep(120, 2, 80);
+    }
+  }
+  if (futureChanged) saveSchedulesToNVS();
+}
+
+// ============================================================================
+// PZEM-004T READING
+// ============================================================================
+void updatePzemReadings() {
+  // Do not turn on or poll PZEM until setup() finishes and enables PZEM_RELAY
+  digitalWrite(PZEM_RELAY, LOW);
+
+  unsigned long now = millis();
+  static unsigned long lastPzemRead = 0;
+  unsigned long intervalMs = max(1, settings.pzemInterval) * 1000UL;
+  if (now - lastPzemRead < intervalMs) return;
+  lastPzemRead = now;
+
+  // Calculate exact elapsed days from last reset timestamp to present
+  if (ntpSynced && lastResetEpoch > 0) {
+    time_t nowEpoch;
+    time(&nowEpoch);
+    if (nowEpoch >= (time_t)lastResetEpoch) {
+      kwhDays = (float)(nowEpoch - (time_t)lastResetEpoch) / 86400.0f;
+    } else {
+      kwhDays = 0.0f;
+    }
+  }
+
+  float v = pzem.voltage();
+  float c = pzem.current();
+  float p = pzem.power();
+  float e = pzem.energy();
+  float hz = pzem.frequency();
+  float pf = pzem.pf();
+  float ut = now / 3600000.0f;
+
+  bool sensorOk = !isnan(v) && !isnan(hz);
+
   portENTER_CRITICAL(&measureMux);
-  Measurements current = readings;
+  readings.valid = sensorOk;
+  readings.voltage = isnan(v) ? 0.0f : v;
+  readings.current = isnan(c) ? 0.0f : c;
+  readings.power = isnan(p) ? 0.0f : p;
+  if (!isnan(e)) readings.energy = e;
+  readings.frequency = isnan(hz) ? 0.0f : hz;
+  readings.pf = isnan(pf) ? 0.0f : pf;
+  readings.uptime = ut;
+  readings.totalDays = kwhDays;
   portEXIT_CRITICAL(&measureMux);
+}
 
-  bool currentProtectionActive = false;
-  static bool waitingForDelay = false;
-
-  // ✅ FIRST: Check if manually turned OFF from menu
-  if (!settings.mainOutput)
-  {
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH); // ✅ Turn OFF relay immediately
-
-    if (!menuActive)
-    {
-      clearLCD(57, 41, 69, 10);
-      u8g2.setFont(u8g2_font_t0_11_tr);
-      u8g2.drawStr(59, 50, "MAIN: OFF");
-      u8g2.sendBuffer();
-    }
-    return; // ✅ Exit early - don't check other conditions
-  }
-
-  // ✅ THEN: Check kWh Saver
-  if (settings.kWhSaver && current.energy >= settings.maxkWh)
-  {
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH); // Turn OFF
-
-    if (!menuActive)
-    {
-      clearLCD(57, 41, 69, 10);
-      u8g2.setFont(u8g2_font_t0_11_tr);
-      u8g2.drawStr(59, 50, "kWh SAVER");
-      u8g2.sendBuffer();
-    }
+// ============================================================================
+// MAIN POWER OUTPUT RELAY & PROTECTION ENGINE (HIGH PRIORITY)
+// ============================================================================
+void controlMainOutput() {
+  // Keep relay OFF during initial boot safety check
+  if (!startupCheckCompleted) {
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
     return;
   }
 
-  // ✅ THEN: Check Protection conditions
-  if ((settings.highVProtec && current.voltage > settings.voltHigh) || (settings.LowVProtec && current.voltage < settings.voltLow) || (settings.highPProtec && current.power > settings.powerHigh) || (settings.highHzProtec && current.frequency > settings.freqHigh) || (settings.lowHzProtec && current.frequency < settings.freqLow))
-  {
+  portENTER_CRITICAL(&measureMux);
+  Measurements cur = readings;
+  portEXIT_CRITICAL(&measureMux);
 
-    currentProtectionActive = true;
-    waitingForDelay = false;
-    digitalWrite(MAIN_RELAY, HIGH); // Turn OFF
+  unsigned long protDelayMs = (unsigned long)max(10, settings.protectionDelay) * 1000UL;
 
-    if (!menuActive)
-    {
-      clearLCD(57, 41, 69, 10);
-      u8g2.setFont(u8g2_font_t0_11_tr);
-      u8g2.drawStr(59, 50, "PRO. TRIG.");
-      u8g2.sendBuffer();
+  // 1. Manual Output OFF
+  if (!settings.mainOutput) {
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "MAIN: OFF");
+    return;
+  }
+
+  // 2. kWh Energy Saver Cutoff
+  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) {
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "kWh SAVER");
+    return;
+  }
+
+  // 3. Evaluate Protection Faults (Only trip on low V / low Hz if sensor is valid)
+  bool faultActive = false;
+  if (cur.valid) {
+    if (settings.highVProtec && cur.voltage > settings.voltHigh) faultActive = true;
+    if (settings.LowVProtec && cur.voltage < settings.voltLow) faultActive = true;
+    if (settings.highPProtec && cur.power > settings.powerHigh) faultActive = true;
+    if (settings.highHzProtec && cur.frequency > settings.freqHigh) faultActive = true;
+    if (settings.lowHzProtec && cur.frequency < settings.freqLow) faultActive = true;
+  }
+
+  if (faultActive) {
+    if (!protectionWasActive) {
+      triggerBeep(250, 3, 100);  // Instant trip alarm
     }
+    protectionWasActive = true;
+    waitingForDelay = false;
     shouldTurnOff = true;
-  }
-  else
-  {
-    shouldTurnOff = false;
+    digitalWrite(MAIN_RELAY, HIGH);  // Immediately cut power
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "PRO. TRIG.");
+    return;
   }
 
-  // Handle protection delay timer
-  if (currentProtectionActive)
-  {
-    protectionWasActive = true;
-    protectionClearedTime = millis();
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH); // Keep OFF
-  }
-  else if (protectionWasActive)
-  {
-    // Protection cleared but waiting for delay
-    if (!waitingForDelay)
-    {
+  // 4. Handle Protection Recovery Wait Timer
+  if (protectionWasActive) {
+    if (!waitingForDelay) {
       protectionClearedTime = millis();
       waitingForDelay = true;
     }
 
-    unsigned long elapsedTime = millis() - protectionClearedTime;
-    unsigned long remainingTime = PROTECTION_DELAY - elapsedTime;
-    int minutes = remainingTime / 60000;
-    int seconds = (remainingTime % 60000) / 1000;
-
-    // Check if wait time completed or reset pressed
-    if (elapsedTime >= PROTECTION_DELAY || digitalRead(RESET_BTN) == HIGH)
-    {
+    unsigned long elapsed = millis() - protectionClearedTime;
+    if (elapsed >= protDelayMs || digitalRead(RESET_BTN) == HIGH) {
       protectionWasActive = false;
       waitingForDelay = false;
       shouldTurnOff = false;
-      digitalWrite(MAIN_RELAY, LOW); // ✅ Turn ON after delay
-    }
-    else
-    {
+      digitalWrite(MAIN_RELAY, LOW);  // Engage Relay
+      relayPhysicalOn = true;
+      strcpy(protectionStatusText, "MAIN: ON");
+      triggerBeep(150, 1, 0);
+    } else {
       shouldTurnOff = true;
-      digitalWrite(MAIN_RELAY, HIGH); // Keep OFF during wait
-
-      char timeStr[32];
-      snprintf(timeStr, sizeof(timeStr), "Wait: %02d:%02d", minutes, seconds);
-      if (!menuActive)
-      {
-        clearLCD(57, 41, 69, 10);
-        u8g2.setFont(u8g2_font_t0_11_tr);
-        u8g2.drawStr(59, 50, timeStr);
-        u8g2.sendBuffer();
-      }
+      digitalWrite(MAIN_RELAY, HIGH);
+      relayPhysicalOn = false;
+      unsigned long rem = protDelayMs - elapsed;
+      int mins = rem / 60000UL;
+      int secs = (rem % 60000UL) / 1000UL;
+      snprintf(protectionStatusText, sizeof(protectionStatusText), "Wait:%02d:%02d", mins, secs);
     }
-  }
-  else
-  {
-    // ✅ All conditions OK - Turn relay ON
+  } else {
     shouldTurnOff = false;
-    digitalWrite(MAIN_RELAY, LOW);
+    digitalWrite(MAIN_RELAY, LOW);  // Engage Relay
+    relayPhysicalOn = true;
+    strcpy(protectionStatusText, "MAIN: ON");
   }
 }
 
-void displayValues()
-{
-  u8g2.setFont(u8g2_font_t0_11_tr);
-  char buffer[16];
+// ============================================================================
+// INSTANT SAFETY ALERTS (0ms Edge Trigger + Periodic Repeat)
+// ============================================================================
+void checkSafetyAlerts() {
+  if (!startupCheckCompleted) return;
 
   portENTER_CRITICAL(&measureMux);
-  Measurements current = readings; // Take a snapshot
+  Measurements cur = readings;
   portEXIT_CRITICAL(&measureMux);
 
-  // Voltage
-  dtostrf(current.voltage, 0, 1, buffer); // Just convert to string
-  clearLCD(2, 3, 43, 9);
-  u8g2.drawStr(3, 12, buffer);
-  u8g2.sendBuffer();
+  if (!cur.valid) return;
 
-  // Current
-  dtostrf(current.current, 0, 2, buffer);
-  clearLCD(2, 15, 43, 9);
-  u8g2.drawStr(3, 24, buffer);
-  u8g2.sendBuffer();
+  uint8_t currentFaultMask = 0;
+  if (settings.highVoltageAlert && cur.voltage > settings.voltHigh) currentFaultMask |= (1 << 0);
+  if (settings.lowVoltageAlert && cur.voltage < settings.voltLow) currentFaultMask |= (1 << 1);
+  if (settings.highPowerAlert && cur.power > settings.powerHigh) currentFaultMask |= (1 << 2);
+  if (settings.lowPowerAlert && cur.power < settings.powerLow) currentFaultMask |= (1 << 3);
+  if (settings.highFreqAlert && cur.frequency > settings.freqHigh) currentFaultMask |= (1 << 4);
+  if (settings.lowFreqAlert && cur.frequency < settings.freqLow) currentFaultMask |= (1 << 5);
 
-  // Frequency
-  dtostrf(current.frequency, 0, 2, buffer);
-  clearLCD(2, 27, 37, 9);
-  u8g2.drawStr(3, 36, buffer);
-  u8g2.sendBuffer();
+  static uint8_t prevFaultMask = 0;
+  static unsigned long lastAlertRepeat = 0;
+  unsigned long now = millis();
 
-  // Uptime
-  dtostrf(current.uptime, 0, 1, buffer);
-  clearLCD(2, 41, 43, 9);
-  u8g2.drawStr(3, 50, buffer);
-  u8g2.sendBuffer();
+  // Instant trigger if ANY new alert bit turns ON
+  bool newFaultAppeared = (currentFaultMask & ~prevFaultMask) != 0;
+  prevFaultMask = currentFaultMask;
 
-  // Total days
-  dtostrf(current.totalDays, 0, 1, buffer);
-  clearLCD(2, 52, 43, 9);
-  u8g2.drawStr(3, 61, buffer);
-  u8g2.sendBuffer();
-
-  // Power factor
-  dtostrf(current.pf, 0, 2, buffer);
-  clearLCD(57, 3, 43, 9);
-  u8g2.drawStr(59, 12, buffer);
-  u8g2.sendBuffer();
-
-  // Power
-  dtostrf(current.power, 0, 1, buffer);
-  clearLCD(57, 15, 57, 9);
-  u8g2.drawStr(59, 24, buffer);
-  u8g2.sendBuffer();
-
-  // Energy
-  dtostrf(current.energy, 0, 2, buffer);
-  clearLCD(57, 27, 49, 9);
-  u8g2.drawStr(59, 36, buffer);
-  u8g2.sendBuffer();
-}
-
-void displayDateAndTime()
-{
-  if (shouldTurnOff)
-    return; // for showing protection message
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo))
-  {
-    char dateStr[8];
-    char timeStr[8];
-
-    // Format date as DD/MM
-    strftime(dateStr, sizeof(dateStr), "%d/%m", &timeinfo);
-    // Format time as HH:MM
-    strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
-
-    u8g2.setFont(u8g2_font_t0_11_tr);
-    clearLCD(57, 41, 69, 10);
-    u8g2.drawStr(59, 50, dateStr); // Show date
-    u8g2.drawStr(95, 50, timeStr); // Show time
-    u8g2.sendBuffer();
-  }
-  else
-  {
-    // Show dashes if time not available
-    if ((WiFi.status() == WL_CONNECTED))
-    {
-      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-      struct tm timeinfo;
-    }
-    clearLCD(57, 41, 69, 10);
-    u8g2.setFont(u8g2_font_t0_11_tr);
-    u8g2.drawStr(59, 50, "--/--");
-    u8g2.drawStr(95, 50, "--:--");
-    u8g2.sendBuffer();
-  }
-}
-
-void showMainDisplay()
-{
-  static unsigned long lastDisplayUpdate = 0;
-  if (millis() - lastDisplayUpdate >= DISPLAY_REFRESH_INTERVAL)
-  {
-    displayLayout();
-    displayValues();
-    displayUnits();
-    displayStatusbar();
-    displayDateAndTime();
-    lastDisplayUpdate = millis();
-  }
-}
-
-// 10. PZEM Functions
-void updatePzemReadings()
-{
-  digitalWrite(PZEM_RELAY, LOW);
-  unsigned long currentMillis = millis();
-  float ut = currentMillis / 36e5;
-
-  static unsigned long lastUpdate = 0;
-  if (currentMillis - lastUpdate < (settings.pzemInterval * 1000))
-    return;
-  float td = (currentMillis - lastUpdate) / 864e5;
-  kwhDays += td;
-  lastUpdate = currentMillis;
-
-  //  portENTER_CRITICAL(&measureMux);
-  // Generate realistic random values for testing
-  //  readings.voltage = 220.0 + random(-500, 500) / 100.0;    // 215.00 to 225.00V
-  //  readings.current = random(0, 1000) / 100.0;              // 0.00 to 10.00A
-  //  readings.power = readings.voltage * readings.current;     // Calculated from V*A
-  //  readings.energy += readings.power / 3600000.0;           // Add kWh per second
-  //  readings.frequency = 50.0 + random(-20, 20) / 100.0;     // 49.80 to 50.20Hz
-  //  readings.pf = 0.85 + random(0, 15) / 100.0;             // 0.85 to 1.00
-  //  readings.uptime = millis() / 3600000.0;                  // Hours
-  //  readings.totalDays = settings.totalDays;                 // From settings
-
-  readings.voltage = pzem.voltage();
-  readings.current = pzem.current();
-  readings.power = pzem.power();
-  // readings.power = random(0, 100000) / 100.0;
-  readings.energy = pzem.energy();
-  readings.frequency = pzem.frequency();
-  readings.pf = pzem.pf();
-  // readings.pf = 0.35 + random(0, 65) / 100.0;
-  readings.uptime = ut;
-  readings.totalDays = kwhDays;
-
-  // Reset Energy
-  if (resetKwhRequested)
-  {
-    if (pzem.resetEnergy())
-    {
-      Serial.println("Energy Reset Done!");
-      resetKwhRequested = false;
-      showMessage("Restarting...");
-      ESP.restart();
-    }
-  }
-  // Reset Days
-  if (resetDaysRequested)
-  {
-    Serial.println("Days Reset Done!");
-    resetDaysValues();
-    resetDaysRequested = false;
-    showMessage("Restarting...");
-    ESP.restart();
-  }
-}
-
-// 11. User, Schedule & Timer Management
-
-void loadUsersFromFile()
-{
-  if (!SPIFFS.exists("/users.json"))
-  {
-    userCount = 1;
-    strcpy(users[0].username, "esp");
-    strcpy(users[0].password, "456456");
-    strcpy(users[0].role, "admin");
-    saveUsersToFile();
-    return;
-  }
-  File f = SPIFFS.open("/users.json", "r");
-  if (!f)
-    return;
-  StaticJsonDocument<1024> doc;
-  deserializeJson(doc, f);
-  f.close();
-  JsonArray arr = doc.as<JsonArray>();
-  userCount = 0;
-  for (JsonObject u : arr)
-  {
-    if (userCount >= MAX_USERS)
-      break;
-    strncpy(users[userCount].username, u["username"] | "", 19);
-    users[userCount].username[19] = '\0';
-    strncpy(users[userCount].password, u["password"] | "", 19);
-    users[userCount].password[19] = '\0';
-    strncpy(users[userCount].role, u["role"] | "user", 9);
-    users[userCount].role[9] = '\0';
-    userCount++;
-  }
-  if (userCount == 0)
-  {
-    userCount = 1;
-    strcpy(users[0].username, "esp");
-    strcpy(users[0].password, "456456");
-    strcpy(users[0].role, "admin");
-    saveUsersToFile();
-  }
-}
-
-void saveUsersToFile()
-{
-  StaticJsonDocument<1024> doc;
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < userCount; i++)
-  {
-    JsonObject u = arr.createNestedObject();
-    u["username"] = users[i].username;
-    u["password"] = users[i].password;
-    u["role"] = users[i].role;
-  }
-  File f = SPIFFS.open("/users.json", "w");
-  if (f)
-  {
-    serializeJson(doc, f);
-    f.close();
-  }
-}
-
-void loadSchedulesFromFile()
-{
-  scheduleCount = 0;
-  if (!SPIFFS.exists("/schedules.json"))
-    return;
-  File f = SPIFFS.open("/schedules.json", "r");
-  if (!f)
-    return;
-  StaticJsonDocument<2048> doc;
-  deserializeJson(doc, f);
-  f.close();
-  JsonArray arr = doc.as<JsonArray>();
-  for (JsonObject s : arr)
-  {
-    if (scheduleCount >= MAX_SCHEDULES)
-      break;
-    strncpy(schedules[scheduleCount].time, s["time"] | "00:00", 5);
-    schedules[scheduleCount].time[5] = '\0';
-    schedules[scheduleCount].actionOn = (String(s["action"] | "off") == "on");
-    JsonArray days = s["days"];
-    schedules[scheduleCount].dayCount = 0;
-    for (JsonVariant d : days)
-    {
-      if (schedules[scheduleCount].dayCount < 7)
-        schedules[scheduleCount].days[schedules[scheduleCount].dayCount++] = d.as<uint8_t>();
-    }
-    scheduleCount++;
-  }
-}
-
-void saveSchedulesToFile()
-{
-  StaticJsonDocument<2048> doc;
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < scheduleCount; i++)
-  {
-    JsonObject s = arr.createNestedObject();
-    s["time"] = schedules[i].time;
-    s["action"] = schedules[i].actionOn ? "on" : "off";
-    JsonArray days = s.createNestedArray("days");
-    for (int j = 0; j < schedules[i].dayCount; j++)
-      days.add(schedules[i].days[j]);
-  }
-  File f = SPIFFS.open("/schedules.json", "w");
-  if (f)
-  {
-    serializeJson(doc, f);
-    f.close();
-  }
-}
-
-void loadFutureSchedulesFromFile()
-{
-  futureScheduleCount = 0;
-  if (!SPIFFS.exists("/future.json"))
-    return;
-  File f = SPIFFS.open("/future.json", "r");
-  if (!f)
-    return;
-  StaticJsonDocument<2048> doc;
-  deserializeJson(doc, f);
-  f.close();
-  JsonArray arr = doc.as<JsonArray>();
-  for (JsonObject s : arr)
-  {
-    if (futureScheduleCount >= MAX_FUTURE_SCHEDULES)
-      break;
-    strncpy(futureSchedules[futureScheduleCount].date, s["date"] | "", 10);
-    futureSchedules[futureScheduleCount].date[10] = '\0';
-    strncpy(futureSchedules[futureScheduleCount].time, s["time"] | "00:00", 5);
-    futureSchedules[futureScheduleCount].time[5] = '\0';
-    futureSchedules[futureScheduleCount].actionOn = (String(s["action"] | "off") == "on");
-    futureScheduleCount++;
-  }
-}
-
-void saveFutureSchedulesToFile()
-{
-  StaticJsonDocument<2048> doc;
-  JsonArray arr = doc.to<JsonArray>();
-  for (int i = 0; i < futureScheduleCount; i++)
-  {
-    JsonObject s = arr.createNestedObject();
-    s["date"] = futureSchedules[i].date;
-    s["time"] = futureSchedules[i].time;
-    s["action"] = futureSchedules[i].actionOn ? "on" : "off";
-  }
-  File f = SPIFFS.open("/future.json", "w");
-  if (f)
-  {
-    serializeJson(doc, f);
-    f.close();
-  }
-}
-
-void checkTimer()
-{
-  if (timerActive && millis() >= timerEndMillis)
-  {
-    timerActive = false;
-    settings.mainOutput = false;
-    saveSettings();
-    digitalWrite(MAIN_RELAY, HIGH);
-    playBeep(3);
-    Serial.println("Timer expired - output OFF");
-  }
-}
-
-void checkSchedules()
-{
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck < 30000)
-    return;
-  lastCheck = millis();
-  if (scheduleCount == 0)
-    return;
-
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo))
-    return;
-
-  char currentTime[6];
-  strftime(currentTime, sizeof(currentTime), "%H:%M", &timeinfo);
-  int currentDay = (timeinfo.tm_wday + 6) % 7;
-
-  for (int i = 0; i < scheduleCount; i++)
-  {
-    if (strcmp(schedules[i].time, currentTime) == 0)
-    {
-      for (int j = 0; j < schedules[i].dayCount; j++)
-      {
-        if (schedules[i].days[j] == currentDay)
-        {
-          bool newState = schedules[i].actionOn;
-          if (settings.mainOutput != newState)
-          {
-            settings.mainOutput = newState;
-            saveSettings();
-            digitalWrite(MAIN_RELAY, newState ? LOW : HIGH);
-            Serial.printf("Schedule: %s at %s\n", newState ? "ON" : "OFF", currentTime);
-          }
-          break;
-        }
-      }
+  if (currentFaultMask != 0) {
+    unsigned long repeatMs = (unsigned long)max(5, settings.alertInterval) * 1000UL;
+    if (newFaultAppeared || (now - lastAlertRepeat >= repeatMs)) {
+      lastAlertRepeat = now;
+      triggerBeep(100, 3, 100);
     }
   }
 }
 
-void checkFutureSchedules()
-{
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck < 30000)
-    return;
-  lastCheck = millis();
-  if (futureScheduleCount == 0)
-    return;
-
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo))
-    return;
-
-  char currentDate[11], currentTime[6];
-  strftime(currentDate, sizeof(currentDate), "%Y-%m-%d", &timeinfo);
-  strftime(currentTime, sizeof(currentTime), "%H:%M", &timeinfo);
-
-  bool changed = false;
-  for (int i = futureScheduleCount - 1; i >= 0; i--)
-  {
-    if (strcmp(futureSchedules[i].date, currentDate) == 0 &&
-        strcmp(futureSchedules[i].time, currentTime) == 0)
-    {
-      bool newState = futureSchedules[i].actionOn;
-      settings.mainOutput = newState;
-      saveSettings();
-      digitalWrite(MAIN_RELAY, newState ? LOW : HIGH);
-      Serial.printf("Future schedule: %s\n", newState ? "ON" : "OFF");
-      for (int j = i; j < futureScheduleCount - 1; j++)
-        futureSchedules[j] = futureSchedules[j + 1];
-      futureScheduleCount--;
-      changed = true;
+// ============================================================================
+// SECONDARY ESP32 SERIAL TELEMETRY & HANDSHAKE
+// ============================================================================
+void shareDataWithSecondary() {
+  // Listen for handshake request from secondary if it rebooted
+  while (espSerial.available()) {
+    String line = espSerial.readStringUntil('\n');
+    line.trim();
+    if (line == "PING" || line == "HELLO") {
+      espSerial.println("READY");
     }
   }
-  if (changed)
-    saveFutureSchedulesToFile();
+
+  static unsigned long lastShare = 0;
+  unsigned long intervalMs = (unsigned long)max(1, settings.espShareInterval) * 1000UL;
+  if (millis() - lastShare < intervalMs) return;
+  lastShare = millis();
+
+  portENTER_CRITICAL(&measureMux);
+  Measurements cur = readings;
+  portEXIT_CRITICAL(&measureMux);
+
+  StaticJsonDocument<768> doc;
+  doc["v"] = serialized(String(cur.voltage, 1));
+  doc["i"] = serialized(String(cur.current, 2));
+  doc["p"] = serialized(String(cur.power, 1));
+  doc["e"] = serialized(String(cur.energy, 2));
+  doc["f"] = serialized(String(cur.frequency, 2));
+  doc["pf"] = serialized(String(cur.pf, 2));
+  doc["up"] = serialized(String(cur.uptime, 1));
+  doc["d"] = serialized(String(kwhDays, 1));
+  doc["ok"] = cur.valid ? 1 : 0;
+
+  doc["vh"] = serialized(String(settings.voltHigh, 1));
+  doc["vl"] = serialized(String(settings.voltLow, 1));
+  doc["ph"] = serialized(String(settings.powerHigh, 1));
+  doc["pl"] = serialized(String(settings.powerLow, 1));
+  doc["fh"] = serialized(String(settings.freqHigh, 2));
+  doc["fl"] = serialized(String(settings.freqLow, 2));
+  doc["tpf"] = serialized(String(settings.targetFactor, 2));
+  doc["mfd"] = serialized(String(settings.mfdPerChannel, 2));
+  doc["max"] = settings.maxkWh;
+  doc["st"] = settings.startupTime;
+  doc["pfl"] = settings.afpcLowWatt;
+  doc["pfh"] = settings.afpcHighWatt;
+
+  doc["esi"] = settings.espShareInterval;
+  doc["nri"] = settings.nodeRedInterval;
+  doc["pzi"] = settings.pzemInterval;
+  doc["sai"] = settings.alertInterval;
+
+  doc["hva"] = settings.highVoltageAlert;
+  doc["lva"] = settings.lowVoltageAlert;
+  doc["hpa"] = settings.highPowerAlert;
+  doc["lpa"] = settings.lowPowerAlert;
+  doc["hfa"] = settings.highFreqAlert;
+  doc["lfa"] = settings.lowFreqAlert;
+
+  doc["hvp"] = settings.highVProtec;
+  doc["lvp"] = settings.LowVProtec;
+  doc["hpp"] = settings.highPProtec;
+  doc["hhp"] = settings.highHzProtec;
+  doc["lhp"] = settings.lowHzProtec;
+
+  doc["afpc"] = settings.afpcEnabled;
+  doc["out"] = settings.mainOutput;
+  doc["kwhs"] = settings.kWhSaver;
+
+  espSerial.print('S');
+  serializeJson(doc, espSerial);
+  espSerial.print("E\n");
 }
 
-// 12. Async Web Server
-// void handleGetData(AsyncWebServerRequest* request) {
-//   AsyncResponseStream* response = request->beginResponseStream("application/json");
-//   StaticJsonDocument<200> jsonDoc;
+// ============================================================================
+// NODE-RED STREAMING
+// ============================================================================
+void sendDataToNodeRed() {
+  if (!settings.nodeRedEnabled || WiFi.status() != WL_CONNECTED) return;
 
-//   // Take mutex before reading values
-//   portENTER_CRITICAL(&measureMux);
-//   Measurements current = readings;  // Take a snapshot
-//   portEXIT_CRITICAL(&measureMux);
+  static unsigned long lastSend = 0;
+  unsigned long intervalMs = (unsigned long)max(5, settings.nodeRedInterval) * 1000UL;
+  if (millis() - lastSend < intervalMs) return;
+  lastSend = millis();
 
-//   // Use snapshot values
-//   jsonDoc["voltage"] = String(current.voltage, 1);
-//   jsonDoc["current"] = String(current.current, 2);
-//   jsonDoc["power"] = String(current.power, 1);
-//   jsonDoc["energy"] = String(current.energy, 2);
-//   jsonDoc["frequency"] = String(current.frequency, 2);
-//   jsonDoc["pf"] = String(current.pf, 2);
-//   jsonDoc["days"] = String(current.totalDays, 1);
-//   jsonDoc["uptime"] = String(current.uptime, 1);
+  char addr[32];
+  strncpy(addr, settings.nodeRedIP, sizeof(addr) - 1);
+  addr[31] = '\0';
+  char* colon = strchr(addr, ':');
+  String url;
+  if (colon) {
+    *colon = '\0';
+    url = "http://" + String(addr) + ":" + String(colon + 1) + "/pzem-data";
+  } else {
+    url = "http://" + String(addr) + ":1880/pzem-data";
+  }
 
-//   serializeJson(jsonDoc, *response);
-//   request->send(response);
-// }
+  portENTER_CRITICAL(&measureMux);
+  Measurements cur = readings;
+  portEXIT_CRITICAL(&measureMux);
 
-// function to setup and start web server
-void setupWebServer()
-{
-  if (webServerStarted)
-    return; // Already started
+  StaticJsonDocument<384> doc;
+  doc["voltage"] = cur.voltage;
+  doc["current"] = cur.current;
+  doc["power"] = cur.power;
+  doc["energy"] = cur.energy;
+  doc["pf"] = cur.pf;
+  doc["frequency"] = cur.frequency;
+  doc["uptime"] = cur.uptime;
+  doc["totalDays"] = cur.totalDays;  // Keep key name for InfluxDB compatibility!
+  doc["mainOutput"] = settings.mainOutput ? 1 : 0;
+  doc["resetTime"] = lastResetTimeStr;  // Optional metadata
 
-  Serial.println("Setting up web server...");
+  String payload;
+  serializeJson(doc, payload);
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/index.html", "text/html"); });
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(1500);  // Short timeout to prevent loop lag
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(payload);
+  if (code > 0 && code < 400) {
+    nodeRedConnected = true;
+    lastNodeRedResponse = "HTTP " + String(code);
+  } else {
+    nodeRedConnected = false;
+    lastNodeRedResponse = "Err";
+  }
+  http.end();
+}
 
-  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/style.css", "text/css"); });
+// ============================================================================
+// WIFI & WEBSERVER MANAGEMENT
+// ============================================================================
+void serveGzipOrRaw(AsyncWebServerRequest* request, const char* path, const char* mimeType) {
+  String gzPath = String(path) + ".gz";
+  if (SPIFFS.exists(gzPath)) {
+    AsyncWebServerResponse* response = request->beginResponse(SPIFFS, gzPath, mimeType);
+    response->addHeader("Content-Encoding", "gzip");
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+  } else if (SPIFFS.exists(path)) {
+    AsyncWebServerResponse* response = request->beginResponse(SPIFFS, path, mimeType);
+    response->addHeader("Cache-Control", "no-cache");
+    request->send(response);
+  } else {
+    request->send(404, "text/plain", "File Not Found in SPIFFS");
+  }
+}
 
-  server.on("/table.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/table.svg", "image/svg+xml"); });
+void setupWebServerRoutes() {
+  // Static Pages (Supports both .gz and uncompressed .html)
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    serveGzipOrRaw(request, "/index.html", "text/html");
+  });
+  server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+    serveGzipOrRaw(request, "/index.html", "text/html");
+  });
+  server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+    serveGzipOrRaw(request, "/config.html", "text/html");
+  });
+  server.on("/plug_icon.svg", HTTP_GET, [](AsyncWebServerRequest* request) {
+    serveGzipOrRaw(request, "/plug_icon.svg", "image/svg+xml");
+  });
 
-  server.on("/plug_icon.svg", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/plug_icon.svg", "image/svg+xml"); });
-
-  server.on("/sensor.json", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
+  // Live Sensor Telemetry
+  server.on("/sensor.json", HTTP_GET, [](AsyncWebServerRequest* request) {
     portENTER_CRITICAL(&measureMux);
-    Measurements current = readings;
+    Measurements cur = readings;
     portEXIT_CRITICAL(&measureMux);
 
     StaticJsonDocument<512> doc;
-    doc["voltage"] = String(current.voltage, 1);
-    doc["current"] = String(current.current, 2);
-    doc["power"] = String(current.power, 1);
-    doc["energy"] = String(current.energy, 2);
-    doc["frequency"] = String(current.frequency, 2);
-    doc["pf"] = String(current.pf, 2);
-    doc["uptime"] = String(current.uptime, 1);
-    doc["days"] = String(current.totalDays, 1);
+    doc["voltage"] = String(cur.voltage, 1);
+    doc["current"] = String(cur.current, 2);
+    doc["power"] = String(cur.power, 1);
+    doc["energy"] = String(cur.energy, 2);
+    doc["frequency"] = String(cur.frequency, 2);
+    doc["pf"] = String(cur.pf, 2);
+    doc["uptime"] = String(cur.uptime, 1);
+    doc["days"] = String(cur.totalDays, 1);
     doc["mainOutput"] = settings.mainOutput ? 1 : 0;
+    doc["resetTime"] = lastResetTimeStr;   // ADD: Send last reset timestamp
+    doc["ntpSynced"] = ntpSynced ? 1 : 0;  // ADD: Send NTP sync status
 
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
 
-  // Main Output Control Route - SET new state
-  server.on(
-      "/output/set", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL,
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-      {
-        StaticJsonDocument<200> doc;
-        DeserializationError error = deserializeJson(doc, (const char *)data);
+  // WiFi Status
+  server.on("/wifi-status.json", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> doc;
+    bool conn = (WiFi.status() == WL_CONNECTED);
+    doc["connected"] = conn;
+    doc["ssid"] = conn ? WiFi.SSID() : "";
+    doc["ip"] = conn ? WiFi.localIP().toString() : "---";
+    doc["rssi"] = conn ? WiFi.RSSI() : 0;
+    doc["mac"] = WiFi.macAddress();
 
-        if (!error)
-        {
-          bool state = doc["state"];
-          bool previousState = settings.mainOutput;
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
 
-          settings.mainOutput = state;
-          saveSettings();
-
-          // Control relay pin
-          digitalWrite(MAIN_RELAY, state ? LOW : HIGH);
-
-          Serial.printf("Web Control: Output set to %s\n", state ? "ON" : "OFF");
-
-          // Push to Firebase only on change
-          if (fbSettings.enabled && WiFi.status() == WL_CONNECTED && previousState != state)
-          {
-            writeOutputToFirebase(state);
-          }
-
-          // Send success response
-          StaticJsonDocument<100> response;
-          response["success"] = true;
-          response["mainOutput"] = state ? 1 : 0;
-
-          String jsonResponse;
-          serializeJson(response, jsonResponse);
-          request->send(200, "application/json", jsonResponse);
-        }
-        else
-        {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid JSON\"}");
-        }
-      });
-
-  // Config Page Route
-  server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
-            { request->send(SPIFFS, "/config.html", "text/html"); });
-
-  // Settings JSON - Get all settings
-  server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
+  // All Settings JSON
+  server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest* request) {
     StaticJsonDocument<1024> doc;
+    doc["mac"] = WiFi.macAddress();
+    doc["macSuffix"] = getMacSuffix();
+    doc["mdnsEnabled"] = settings.mdnsEnabled;
+    doc["mdnsHostname"] = settings.mdnsHostname;
+    doc["gmtOffset"] = settings.gmtOffset;
     doc["mainOutput"] = settings.mainOutput;
     doc["kWhSaver"] = settings.kWhSaver;
-    doc["nodeRedEnabled"] = settings.nodeRedEnabled;
-    doc["nodeRedIP"] = String(settings.nodeRedIP) + ":" + String(settings.nodeRedPort);
     doc["afpcEnabled"] = settings.afpcEnabled;
     doc["targetFactor"] = settings.targetFactor;
     doc["mfdPerChannel"] = settings.mfdPerChannel;
-    doc["voltHigh"] = settings.voltHigh;
-    doc["voltLow"] = settings.voltLow;
-    doc["powerHigh"] = settings.powerHigh;
-    doc["powerLow"] = settings.powerLow;
+    doc["nodeRedEnabled"] = settings.nodeRedEnabled;
+    doc["nodeRedIP"] = settings.nodeRedIP;
+    doc["voltHigh"] = (int)settings.voltHigh;
+    doc["voltLow"] = (int)settings.voltLow;
+    doc["powerHigh"] = (int)settings.powerHigh;
+    doc["powerLow"] = (int)settings.powerLow;
     doc["freqHigh"] = settings.freqHigh;
     doc["freqLow"] = settings.freqLow;
     doc["maxkWh"] = settings.maxkWh;
@@ -1284,859 +1086,1515 @@ void setupWebServer()
     doc["alertInterval"] = settings.alertInterval;
     doc["protectionDelay"] = settings.protectionDelay;
     doc["startupTime"] = settings.startupTime;
-    doc["fbEnabled"] = fbSettings.enabled;
-    doc["fbHost"] = fbSettings.host;
-    doc["fbInterval"] = fbSettings.dataInterval;
-    
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
 
-  // WiFi Status Route
-  server.on("/wifi-status.json", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    StaticJsonDocument<256> doc;
-    doc["connected"] = (WiFi.status() == WL_CONNECTED);
-    if (WiFi.status() == WL_CONNECTED) {
-      doc["ssid"] = WiFi.SSID();
-      doc["ip"] = WiFi.localIP().toString();
-      doc["rssi"] = WiFi.RSSI();
-    }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
 
-  // Set Individual Setting Route
-  server.on("/setting/set", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      DeserializationError error = deserializeJson(doc, (const char*)data);
-      
-      if (!error && doc.containsKey("key")) {
-        String key = doc["key"].as<String>();
-        bool success = true;
-        
-        // Boolean settings
-        if (key == "mainOutput") { settings.mainOutput = doc["value"].as<bool>(); digitalWrite(MAIN_RELAY, settings.mainOutput ? LOW : HIGH); }
-        else if (key == "kWhSaver") settings.kWhSaver = doc["value"].as<bool>();
-        else if (key == "nodeRedEnabled") settings.nodeRedEnabled = doc["value"].as<bool>();
-        else if (key == "afpcEnabled") settings.afpcEnabled = doc["value"].as<bool>();
-        else if (key == "highVoltageAlert") settings.highVoltageAlert = doc["value"].as<bool>();
-        else if (key == "lowVoltageAlert") settings.lowVoltageAlert = doc["value"].as<bool>();
-        else if (key == "highPowerAlert") settings.highPowerAlert = doc["value"].as<bool>();
-        else if (key == "lowPowerAlert") settings.lowPowerAlert = doc["value"].as<bool>();
-        else if (key == "lowFreqAlert") settings.lowFreqAlert = doc["value"].as<bool>();
-        else if (key == "highFreqAlert") settings.highFreqAlert = doc["value"].as<bool>();
-        else if (key == "highVProtec") settings.highVProtec = doc["value"].as<bool>();
-        else if (key == "LowVProtec") settings.LowVProtec = doc["value"].as<bool>();
-        else if (key == "highPProtec") settings.highPProtec = doc["value"].as<bool>();
-        else if (key == "highHzProtec") settings.highHzProtec = doc["value"].as<bool>();
-        else if (key == "lowHzProtec") settings.lowHzProtec = doc["value"].as<bool>();
-        else if (key == "fbEnabled") fbSettings.enabled = doc["value"].as<bool>();
-        // Integer settings
-        else if (key == "voltHigh") settings.voltHigh = doc["value"].as<int>();
-        else if (key == "voltLow") settings.voltLow = doc["value"].as<int>();
-        else if (key == "powerHigh") settings.powerHigh = doc["value"].as<int>();
-        else if (key == "powerLow") settings.powerLow = doc["value"].as<int>();
-        else if (key == "maxkWh") settings.maxkWh = doc["value"].as<int>();
-        else if (key == "afpcLowWatt") settings.afpcLowWatt = doc["value"].as<int>();
-        else if (key == "afpcHighWatt") settings.afpcHighWatt = doc["value"].as<int>();
-        else if (key == "espShareInterval") settings.espShareInterval = doc["value"].as<int>();
-        else if (key == "nodeRedInterval") settings.nodeRedInterval = doc["value"].as<int>();
-        else if (key == "pzemInterval") settings.pzemInterval = doc["value"].as<int>();
-        else if (key == "alertInterval") settings.alertInterval = doc["value"].as<int>();
-        else if (key == "protectionDelay") settings.protectionDelay = doc["value"].as<int>();
-        else if (key == "startupTime") settings.startupTime = doc["value"].as<int>();
-        // Float settings
-        else if (key == "targetFactor") settings.targetFactor = doc["value"].as<float>();
-        else if (key == "mfdPerChannel") settings.mfdPerChannel = doc["value"].as<float>();
-        else if (key == "freqHigh") settings.freqHigh = doc["value"].as<float>();
-        else if (key == "freqLow") settings.freqLow = doc["value"].as<float>();
-        else success = false;
-        
-        if (success) {
-          saveSettings();
-          playBeep(1);  // Confirmation beep
-          request->send(200, "application/json", "{\"success\":true}");
-        } else {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Unknown key\"}");
+  // Main Output Toggle from Home Page
+  server.on(
+    "/output/set", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        bool state = doc["state"];
+        settings.mainOutput = state;
+        if (state) {
+          protectionWasActive = false;
+          waitingForDelay = false;
+          shouldTurnOff = false;
         }
+        saveSettings();
+        triggerBeep(60, 1, 0);
+        request->send(200, "application/json", state ? "{\"success\":true,\"mainOutput\":1}" : "{\"success\":true,\"mainOutput\":0}");
       } else {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid request\"}");
-      } });
+        request->send(400, "application/json", "{\"success\":false}");
+      }
+    });
 
-  // WiFi Control Routes
-  server.on("/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(2);
-    wm.startConfigPortal("ESP.EnergyLog");
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  server.on("/wifi/disconnect", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(1);
-    WiFi.disconnect();
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  server.on("/wifi/forget", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(2);
-    wm.resetSettings();
-    request->send(200, "application/json", "{\"success\":true}");
-    delay(500);
-    ESP.restart(); });
-
-  // Node-RED Routes
-  server.on("/nodered/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      DeserializationError error = deserializeJson(doc, (const char*)data);
-      if (!error && doc.containsKey("address")) {
-        String address = doc["address"].as<String>();
-        int colonPos = address.indexOf(':');
-        if (colonPos > 0) {
-          strncpy(settings.nodeRedIP, address.substring(0, colonPos).c_str(), sizeof(settings.nodeRedIP) - 1);
-          settings.nodeRedPort = address.substring(colonPos + 1).toInt();
-          saveSettings();
-          playBeep(1);
-          request->send(200, "application/json", "{\"success\":true}");
-        } else {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid address\"}");
+  // Individual Setting Update
+  server.on(
+    "/setting/set", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"success\":false}");
+        return;
+      }
+      String key = doc["key"] | "";
+      if (key == "mainOutput") {
+        settings.mainOutput = doc["value"].as<bool>();
+        if (settings.mainOutput) {
+          protectionWasActive = false;
+          waitingForDelay = false;
         }
-      } else {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid request\"}");
-      } });
+      } else if (key == "kWhSaver") settings.kWhSaver = doc["value"].as<bool>();
+      else if (key == "afpcEnabled") settings.afpcEnabled = doc["value"].as<bool>();
+      else if (key == "targetFactor") settings.targetFactor = constrain(doc["value"].as<float>(), 0.50f, 0.99f);
+      else if (key == "mfdPerChannel") settings.mfdPerChannel = constrain(doc["value"].as<float>(), 0.1f, 25.0f);
+      else if (key == "nodeRedEnabled") settings.nodeRedEnabled = doc["value"].as<bool>();
+      else if (key == "mdnsEnabled") {
+        settings.mdnsEnabled = doc["value"].as<bool>();
+        pendingMdnsRestart = true;
+      } else if (key == "mdnsHostname") {
+        strncpy(settings.mdnsHostname, doc["value"] | "", 31);
+        pendingMdnsRestart = true;
+      } else if (key == "voltHigh") settings.voltHigh = doc["value"].as<float>();
+      else if (key == "voltLow") settings.voltLow = doc["value"].as<float>();
+      else if (key == "powerHigh") settings.powerHigh = doc["value"].as<float>();
+      else if (key == "powerLow") settings.powerLow = doc["value"].as<float>();
+      else if (key == "freqHigh") settings.freqHigh = doc["value"].as<float>();
+      else if (key == "freqLow") settings.freqLow = doc["value"].as<float>();
+      else if (key == "maxkWh") settings.maxkWh = doc["value"].as<int>();
+      else if (key == "afpcLowWatt") settings.afpcLowWatt = doc["value"].as<int>();
+      else if (key == "afpcHighWatt") settings.afpcHighWatt = doc["value"].as<int>();
+      else if (key == "highVoltageAlert") settings.highVoltageAlert = doc["value"].as<bool>();
+      else if (key == "lowVoltageAlert") settings.lowVoltageAlert = doc["value"].as<bool>();
+      else if (key == "highPowerAlert") settings.highPowerAlert = doc["value"].as<bool>();
+      else if (key == "lowPowerAlert") settings.lowPowerAlert = doc["value"].as<bool>();
+      else if (key == "lowFreqAlert") settings.lowFreqAlert = doc["value"].as<bool>();
+      else if (key == "highFreqAlert") settings.highFreqAlert = doc["value"].as<bool>();
+      else if (key == "highVProtec") settings.highVProtec = doc["value"].as<bool>();
+      else if (key == "LowVProtec") settings.LowVProtec = doc["value"].as<bool>();
+      else if (key == "highPProtec") settings.highPProtec = doc["value"].as<bool>();
+      else if (key == "highHzProtec") settings.highHzProtec = doc["value"].as<bool>();
+      else if (key == "lowHzProtec") settings.lowHzProtec = doc["value"].as<bool>();
+      else if (key == "espShareInterval") settings.espShareInterval = max(1, doc["value"].as<int>());
+      else if (key == "nodeRedInterval") settings.nodeRedInterval = max(5, doc["value"].as<int>());
+      else if (key == "pzemInterval") settings.pzemInterval = max(1, doc["value"].as<int>());
+      else if (key == "alertInterval") settings.alertInterval = max(5, doc["value"].as<int>());
+      else if (key == "protectionDelay") settings.protectionDelay = max(10, doc["value"].as<int>());
+      else if (key == "startupTime") settings.startupTime = constrain(doc["value"].as<int>(), 0, 600);
 
-  server.on("/nodered/test", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    // Simple ping test - try to connect
-    WiFiClient client;
-    bool connected = client.connect(settings.nodeRedIP, settings.nodeRedPort);
-    client.stop();
-    request->send(200, "application/json", connected ? "{\"connected\":true}" : "{\"connected\":false}"); });
+      saveSettings();
+      request->send(200, "application/json", "{\"success\":true}");
+    });
 
-  // Firebase Routes
-  server.on("/firebase/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<400> doc;
-      DeserializationError error = deserializeJson(doc, (const char*)data);
-      if (!error) {
-        if (doc.containsKey("host")) strncpy(fbSettings.host, doc["host"].as<const char*>(), sizeof(fbSettings.host) - 1);
-        if (doc.containsKey("auth")) strncpy(fbSettings.auth, doc["auth"].as<const char*>(), sizeof(fbSettings.auth) - 1);
-        if (doc.containsKey("interval")) fbSettings.dataInterval = doc["interval"].as<int>();
-        saveFirebaseSettings();
-        playBeep(1);
+  // Batch Section Save Endpoints
+  server.on(
+    "/output/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.mainOutput = doc["mainOutput"] | settings.mainOutput;
+        settings.kWhSaver = doc["kWhSaver"] | settings.kWhSaver;
+        if (settings.mainOutput) {
+          protectionWasActive = false;
+          waitingForDelay = false;
+        }
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/afpc/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.afpcEnabled = doc["afpcEnabled"] | settings.afpcEnabled;
+        settings.targetFactor = doc["targetFactor"] | settings.targetFactor;
+        settings.mfdPerChannel = doc["mfdPerChannel"] | settings.mfdPerChannel;
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/thresholds/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.voltHigh = doc["voltHigh"] | settings.voltHigh;
+        settings.voltLow = doc["voltLow"] | settings.voltLow;
+        settings.powerHigh = doc["powerHigh"] | settings.powerHigh;
+        settings.powerLow = doc["powerLow"] | settings.powerLow;
+        settings.maxkWh = doc["maxkWh"] | settings.maxkWh;
+        settings.freqHigh = doc["freqHigh"] | settings.freqHigh;
+        settings.freqLow = doc["freqLow"] | settings.freqLow;
+        settings.afpcLowWatt = doc["afpcLowWatt"] | settings.afpcLowWatt;
+        settings.afpcHighWatt = doc["afpcHighWatt"] | settings.afpcHighWatt;
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/alerts/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.highVoltageAlert = doc["highVoltageAlert"] | false;
+        settings.lowVoltageAlert = doc["lowVoltageAlert"] | false;
+        settings.highPowerAlert = doc["highPowerAlert"] | false;
+        settings.lowPowerAlert = doc["lowPowerAlert"] | false;
+        settings.lowFreqAlert = doc["lowFreqAlert"] | false;
+        settings.highFreqAlert = doc["highFreqAlert"] | false;
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/protection/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.highVProtec = doc["highVProtec"] | false;
+        settings.LowVProtec = doc["LowVProtec"] | false;
+        settings.highPProtec = doc["highPProtec"] | false;
+        settings.highHzProtec = doc["highHzProtec"] | false;
+        settings.lowHzProtec = doc["lowHzProtec"] | false;
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/intervals/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.espShareInterval = max(1, doc["espShareInterval"] | settings.espShareInterval);
+        settings.nodeRedInterval = max(5, doc["nodeRedInterval"] | settings.nodeRedInterval);
+        settings.pzemInterval = max(1, doc["pzemInterval"] | settings.pzemInterval);
+        settings.alertInterval = max(5, doc["alertInterval"] | settings.alertInterval);
+        settings.protectionDelay = max(10, doc["protectionDelay"] | settings.protectionDelay);
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on(
+    "/startup/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.startupTime = constrain(doc["startupTime"] | settings.startupTime, 0, 600);
+        saveSettings();
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  // mDNS Endpoints
+  server.on(
+    "/mdns/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.mdnsEnabled = doc["enabled"] | true;
+        String host = doc["hostname"] | "";
+        host.trim();
+        if (host.length() > 0 && host.length() < 31) {
+          strncpy(settings.mdnsHostname, host.c_str(), 31);
+          settings.mdnsHostname[31] = '\0';
+        }
+        saveSettings();
+        pendingMdnsRestart = true;
         request->send(200, "application/json", "{\"success\":true}");
       } else {
         request->send(400, "application/json", "{\"success\":false}");
-      } });
-
-  server.on("/firebase/test", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    bool success = Firebase.ready();
-    request->send(200, "application/json", success ? "{\"success\":true}" : "{\"success\":false}"); });
-
-  server.on("/firebase/forget", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    memset(fbSettings.host, 0, sizeof(fbSettings.host));
-    memset(fbSettings.auth, 0, sizeof(fbSettings.auth));
-    fbSettings.enabled = false;
-    saveFirebaseSettings();
-    playBeep(1);
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  // Data Management Routes
-  server.on("/data/clear-kwh", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(2);
-    pzem.resetEnergy();
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  server.on("/data/clear-days", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(2);
-    preferences.begin("energy_data", false);
-    preferences.putFloat("totalDays", 0.0);
-    preferences.end();
-    request->send(200, "application/json", "{\"success\":true}");
-    delay(500);
-    ESP.restart(); });
-
-  server.on("/factory/reset-data", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(3);
-    pzem.resetEnergy();
-    preferences.begin("energy_data", false);
-    preferences.clear();
-    preferences.end();
-    request->send(200, "application/json", "{\"success\":true}");
-    delay(500);
-    ESP.restart(); });
-
-  server.on("/factory/reset-settings", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(3);
-    wm.resetSettings();
-    EEPROM.begin(EEPROM_SIZE);
-    for (int i = 0; i < EEPROM_SIZE; i++) EEPROM.write(i, 0xFF);
-    EEPROM.commit();
-    EEPROM.end();
-    request->send(200, "application/json", "{\"success\":true}");
-    delay(500);
-    ESP.restart(); });
-
-  // System Routes
-  server.on("/time/sync", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    configTime(19800, 0, "pool.ntp.org", "time.nist.gov");
-    playBeep(1);
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    playBeep(2);
-    request->send(200, "application/json", "{\"success\":true}");
-    delay(500);
-    ESP.restart(); });
-
-  // Batch Save Routes
-  server.on("/output/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("mainOutput")) { settings.mainOutput = doc["mainOutput"].as<bool>(); digitalWrite(MAIN_RELAY, settings.mainOutput ? LOW : HIGH); }
-        if (doc.containsKey("kWhSaver")) settings.kWhSaver = doc["kWhSaver"].as<bool>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/afpc/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("afpcEnabled")) settings.afpcEnabled = doc["afpcEnabled"].as<bool>();
-        if (doc.containsKey("targetFactor")) settings.targetFactor = doc["targetFactor"].as<float>();
-        if (doc.containsKey("mfdPerChannel")) settings.mfdPerChannel = doc["mfdPerChannel"].as<float>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/alerts/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("highVoltageAlert")) settings.highVoltageAlert = doc["highVoltageAlert"].as<bool>();
-        if (doc.containsKey("lowVoltageAlert")) settings.lowVoltageAlert = doc["lowVoltageAlert"].as<bool>();
-        if (doc.containsKey("highPowerAlert")) settings.highPowerAlert = doc["highPowerAlert"].as<bool>();
-        if (doc.containsKey("lowPowerAlert")) settings.lowPowerAlert = doc["lowPowerAlert"].as<bool>();
-        if (doc.containsKey("lowFreqAlert")) settings.lowFreqAlert = doc["lowFreqAlert"].as<bool>();
-        if (doc.containsKey("highFreqAlert")) settings.highFreqAlert = doc["highFreqAlert"].as<bool>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/protection/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("highVProtec")) settings.highVProtec = doc["highVProtec"].as<bool>();
-        if (doc.containsKey("LowVProtec")) settings.LowVProtec = doc["LowVProtec"].as<bool>();
-        if (doc.containsKey("highPProtec")) settings.highPProtec = doc["highPProtec"].as<bool>();
-        if (doc.containsKey("highHzProtec")) settings.highHzProtec = doc["highHzProtec"].as<bool>();
-        if (doc.containsKey("lowHzProtec")) settings.lowHzProtec = doc["lowHzProtec"].as<bool>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/intervals/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("espShareInterval")) settings.espShareInterval = doc["espShareInterval"].as<int>();
-        if (doc.containsKey("nodeRedInterval")) settings.nodeRedInterval = doc["nodeRedInterval"].as<int>();
-        if (doc.containsKey("pzemInterval")) settings.pzemInterval = doc["pzemInterval"].as<int>();
-        if (doc.containsKey("alertInterval")) settings.alertInterval = doc["alertInterval"].as<int>();
-        if (doc.containsKey("protectionDelay")) { settings.protectionDelay = doc["protectionDelay"].as<int>(); PROTECTION_DELAY = settings.protectionDelay * 1000UL; }
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/startup/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("startupTime")) settings.startupTime = doc["startupTime"].as<int>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/thresholds/save", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        if (doc.containsKey("voltHigh")) settings.voltHigh = doc["voltHigh"].as<int>();
-        if (doc.containsKey("voltLow")) settings.voltLow = doc["voltLow"].as<int>();
-        if (doc.containsKey("powerHigh")) settings.powerHigh = doc["powerHigh"].as<int>();
-        if (doc.containsKey("powerLow")) settings.powerLow = doc["powerLow"].as<int>();
-        if (doc.containsKey("maxkWh")) settings.maxkWh = doc["maxkWh"].as<int>();
-        if (doc.containsKey("freqHigh")) settings.freqHigh = doc["freqHigh"].as<float>();
-        if (doc.containsKey("freqLow")) settings.freqLow = doc["freqLow"].as<float>();
-        if (doc.containsKey("afpcLowWatt")) settings.afpcLowWatt = doc["afpcLowWatt"].as<int>();
-        if (doc.containsKey("afpcHighWatt")) settings.afpcHighWatt = doc["afpcHighWatt"].as<int>();
-        saveSettings();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  // Timezone Route
-  server.on("/time/timezone", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        int offset = doc["offset"].as<int>();
-        gmtOffset_sec = offset;
-        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  // Firebase Rules Route
-  server.on("/firebase/rules", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<2048> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        String rules = doc["rules"].as<String>();
-        File f = SPIFFS.open("/fb_rules.json", "w");
-        if (f) { f.print(rules); f.close(); }
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  // Timer Routes
-  server.on("/automation/timer/start", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        int duration = doc["duration"].as<int>();
-        timerEndMillis = millis() + (unsigned long)duration * 1000;
-        timerActive = true;
-        playBeep(1);
-        Serial.printf("Timer started: %d seconds\n", duration);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/automation/timer/cancel", HTTP_POST, [](AsyncWebServerRequest *request)
-            {
-    timerActive = false;
-    timerEndMillis = 0;
-    playBeep(1);
-    request->send(200, "application/json", "{\"success\":true}"); });
-
-  server.on("/automation/timer/status", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    StaticJsonDocument<200> doc;
-    doc["active"] = timerActive;
-    if (timerActive) {
-      unsigned long remaining = (timerEndMillis > millis()) ? (timerEndMillis - millis()) / 1000 : 0;
-      doc["remaining"] = remaining;
-    } else {
-      doc["remaining"] = 0;
-    }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
-
-  // Schedule Routes
-  server.on("/automation/schedule/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      if (scheduleCount >= MAX_SCHEDULES) {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Max schedules reached\"}");
-        return;
       }
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        strncpy(schedules[scheduleCount].time, doc["time"] | "00:00", 5);
-        schedules[scheduleCount].time[5] = '\0';
-        schedules[scheduleCount].actionOn = (String(doc["action"] | "off") == "on");
-        JsonArray days = doc["days"];
-        schedules[scheduleCount].dayCount = 0;
-        for (JsonVariant d : days) {
-          if (schedules[scheduleCount].dayCount < 7)
-            schedules[scheduleCount].days[schedules[scheduleCount].dayCount++] = d.as<uint8_t>();
+    });
+
+  server.on(
+    "/mdns/reset", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      settings.mdnsEnabled = true;
+      strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+      settings.mdnsHostname[31] = '\0';
+      saveSettings();
+      pendingMdnsRestart = true;
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  server.on("/mdns/delete", HTTP_POST, [](AsyncWebServerRequest* request) {
+    settings.mdnsEnabled = false;
+    strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+    saveSettings();
+    pendingMdnsRestart = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+
+  // Node-RED Endpoints
+  server.on(
+    "/nodered/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        String addr = doc["address"] | "";
+        if (addr.length() > 0 && addr.length() < 31) {
+          strncpy(settings.nodeRedIP, addr.c_str(), 31);
+          settings.nodeRedIP[31] = '\0';
+          saveSettings();
         }
-        scheduleCount++;
-        saveSchedulesToFile();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  server.on("/automation/schedule/list", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    StaticJsonDocument<2048> doc;
-    JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < scheduleCount; i++) {
-      JsonObject s = arr.createNestedObject();
-      s["time"] = schedules[i].time;
-      s["action"] = schedules[i].actionOn ? "on" : "off";
-      JsonArray days = s.createNestedArray("days");
-      for (int j = 0; j < schedules[i].dayCount; j++) days.add(schedules[i].days[j]);
-    }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
-
-  server.on("/automation/schedule/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        int idx = doc["index"].as<int>();
-        if (idx >= 0 && idx < scheduleCount) {
-          for (int i = idx; i < scheduleCount - 1; i++) schedules[i] = schedules[i + 1];
-          scheduleCount--;
-          saveSchedulesToFile();
-          playBeep(1);
-          request->send(200, "application/json", "{\"success\":true}");
-        } else request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid index\"}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
-
-  // Future Schedule Routes
-  server.on("/automation/future/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      if (futureScheduleCount >= MAX_FUTURE_SCHEDULES) {
-        request->send(400, "application/json", "{\"success\":false,\"error\":\"Max future schedules reached\"}");
-        return;
       }
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        strncpy(futureSchedules[futureScheduleCount].date, doc["date"] | "", 10);
-        futureSchedules[futureScheduleCount].date[10] = '\0';
-        strncpy(futureSchedules[futureScheduleCount].time, doc["time"] | "00:00", 5);
-        futureSchedules[futureScheduleCount].time[5] = '\0';
-        futureSchedules[futureScheduleCount].actionOn = (String(doc["action"] | "off") == "on");
-        futureScheduleCount++;
-        saveFutureSchedulesToFile();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
+      request->send(200, "application/json", "{\"success\":true}");
+    });
 
-  server.on("/automation/future/list", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    StaticJsonDocument<2048> doc;
-    JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < futureScheduleCount; i++) {
-      JsonObject s = arr.createNestedObject();
-      s["date"] = futureSchedules[i].date;
-      s["time"] = futureSchedules[i].time;
-      s["action"] = futureSchedules[i].actionOn ? "on" : "off";
+  server.on("/nodered/test", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<128> doc;
+    doc["connected"] = nodeRedConnected;
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
+
+  // WiFi Action Endpoints (Deferred to loop)
+  server.on("/wifi/connect", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingWiFiPortal = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/wifi/disconnect", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingWiFiDisconnect = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/wifi/forget", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingWiFiForget = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+
+  // Data, Time & System Maintenance Endpoints
+  server.on("/data/clear-kwh", HTTP_POST, [](AsyncWebServerRequest* request) {
+    struct tm ti;
+    if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"NTP not synced! Sync time before resetting kWh.\"}");
+      return;
     }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
+    resetKwhRequested = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/data/clear-days", HTTP_POST, [](AsyncWebServerRequest* request) {
+    struct tm ti;
+    if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"NTP not synced! Sync time before resetting billing.\"}");
+      return;
+    }
+    resetDaysRequested = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/factory/reset-data", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingFactoryData = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/factory/reset-settings", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingFactoryAll = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on(
+    "/time/timezone", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        settings.gmtOffset = doc["offset"] | 19800;
+        saveSettings();
+        pendingNtpSync = true;
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+  server.on("/time/sync", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingNtpSync = true;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+  server.on("/restart", HTTP_POST, [](AsyncWebServerRequest* request) {
+    pendingRestart = true;
+    restartScheduledMillis = millis() + 400;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
 
-  server.on("/automation/future/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<200> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        int idx = doc["index"].as<int>();
-        if (idx >= 0 && idx < futureScheduleCount) {
-          for (int i = idx; i < futureScheduleCount - 1; i++) futureSchedules[i] = futureSchedules[i + 1];
-          futureScheduleCount--;
-          saveFutureSchedulesToFile();
-          playBeep(1);
+  // Automation: Quick Timer
+  server.on("/automation/timer/status", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<128> doc;
+    doc["active"] = quickTimerActive;
+    long rem = quickTimerActive ? max(0L, (long)(quickTimerEndMillis - millis()) / 1000L) : 0;
+    doc["remaining"] = rem;
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
+
+  server.on(
+    "/automation/timer/start", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        unsigned long durSec = doc["duration"] | 0;
+        if (durSec > 0) {
+          quickTimerActive = true;
+          quickTimerEndMillis = millis() + (durSec * 1000UL);
           request->send(200, "application/json", "{\"success\":true}");
-        } else request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid index\"}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
+          return;
+        }
+      }
+      request->send(400, "application/json", "{\"success\":false}");
+    });
 
-  // User Management Routes
-  server.on("/users/list", HTTP_GET, [](AsyncWebServerRequest *request)
-            {
-    StaticJsonDocument<1024> doc;
+  server.on("/automation/timer/cancel", HTTP_POST, [](AsyncWebServerRequest* request) {
+    quickTimerActive = false;
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+
+  // Automation: Daily Schedules
+  server.on("/automation/schedule/list", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<768> doc;
     JsonArray arr = doc.to<JsonArray>();
-    for (int i = 0; i < userCount; i++) {
-      JsonObject u = arr.createNestedObject();
-      u["username"] = users[i].username;
-      u["password"] = users[i].password;
-      u["role"] = users[i].role;
+    for (int i = 0; i < MAX_DAILY_SCHEDULES; i++) {
+      if (dailySchedules[i].active) {
+        JsonObject o = arr.createNestedObject();
+        char tBuf[8];
+        snprintf(tBuf, sizeof(tBuf), "%02d:%02d", dailySchedules[i].hour, dailySchedules[i].minute);
+        o["time"] = tBuf;
+        o["action"] = dailySchedules[i].turnOn ? "on" : "off";
+        JsonArray dArr = o.createNestedArray("days");
+        for (int d = 0; d < 7; d++) {
+          if (dailySchedules[i].daysMask & (1 << d)) dArr.add(d);
+        }
+      }
     }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response); });
+    String res;
+    serializeJson(arr, res);
+    request->send(200, "application/json", res);
+  });
 
-  server.on("/users/add", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        String adminUser = doc["adminUser"] | "";
-        String adminPass = doc["adminPass"] | "";
-        // Verify admin credentials
-        bool isAdmin = false;
-        for (int i = 0; i < userCount; i++) {
-          if (adminUser == users[i].username && adminPass == users[i].password && strcmp(users[i].role, "admin") == 0) {
-            isAdmin = true; break;
-          }
-        }
-        if (!isAdmin) {
-          request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
-          return;
-        }
-        if (userCount >= MAX_USERS) {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Max users reached\"}");
-          return;
-        }
-        String username = doc["username"] | "";
-        String password = doc["password"] | "";
-        String role = doc["role"] | "user";
-        if (username.length() < 3 || password.length() < 4) {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Username min 3, password min 4 chars\"}");
-          return;
-        }
-        // Check duplicate
-        for (int i = 0; i < userCount; i++) {
-          if (username == users[i].username) {
-            request->send(400, "application/json", "{\"success\":false,\"error\":\"Username already exists\"}");
+  server.on(
+    "/automation/schedule/add", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        for (int i = 0; i < MAX_DAILY_SCHEDULES; i++) {
+          if (!dailySchedules[i].active) {
+            String t = doc["time"] | "08:00";
+            dailySchedules[i].hour = t.substring(0, 2).toInt();
+            dailySchedules[i].minute = t.substring(3, 5).toInt();
+            dailySchedules[i].turnOn = (String(doc["action"] | "on") == "on");
+            uint8_t mask = 0;
+            JsonArray dArr = doc["days"].as<JsonArray>();
+            for (JsonVariant v : dArr) mask |= (1 << v.as<int>());
+            dailySchedules[i].daysMask = mask;
+            dailySchedules[i].lastTriggeredYDay = -1;
+            dailySchedules[i].active = true;
+            saveSchedulesToNVS();
+            request->send(200, "application/json", "{\"success\":true}");
             return;
           }
         }
-        strncpy(users[userCount].username, username.c_str(), 19);
-        users[userCount].username[19] = '\0';
-        strncpy(users[userCount].password, password.c_str(), 19);
-        users[userCount].password[19] = '\0';
-        strncpy(users[userCount].role, role.c_str(), 9);
-        users[userCount].role[9] = '\0';
-        userCount++;
-        saveUsersToFile();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
+      }
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"Schedule list full\"}");
+    });
 
-  server.on("/users/delete", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-            {
-      StaticJsonDocument<512> doc;
-      if (!deserializeJson(doc, (const char *)data)) {
-        String adminUser = doc["adminUser"] | "";
-        String adminPass = doc["adminPass"] | "";
-        bool isAdmin = false;
-        for (int i = 0; i < userCount; i++) {
-          if (adminUser == users[i].username && adminPass == users[i].password && strcmp(users[i].role, "admin") == 0) {
-            isAdmin = true; break;
+  server.on(
+    "/automation/schedule/delete", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        int targetIdx = doc["index"] | -1;
+        int activeCounter = 0;
+        for (int i = 0; i < MAX_DAILY_SCHEDULES; i++) {
+          if (dailySchedules[i].active) {
+            if (activeCounter == targetIdx) {
+              dailySchedules[i].active = false;
+              saveSchedulesToNVS();
+              break;
+            }
+            activeCounter++;
           }
         }
-        if (!isAdmin) {
-          request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  // Automation: Future Schedules
+  server.on("/automation/future/list", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<768> doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_FUTURE_SCHEDULES; i++) {
+      if (futureSchedules[i].active) {
+        JsonObject o = arr.createNestedObject();
+        char dBuf[12], tBuf[8];
+        snprintf(dBuf, sizeof(dBuf), "%04d-%02d-%02d", futureSchedules[i].year, futureSchedules[i].month, futureSchedules[i].day);
+        snprintf(tBuf, sizeof(tBuf), "%02d:%02d", futureSchedules[i].hour, futureSchedules[i].minute);
+        o["date"] = dBuf;
+        o["time"] = tBuf;
+        o["action"] = futureSchedules[i].turnOn ? "on" : "off";
+      }
+    }
+    String res;
+    serializeJson(arr, res);
+    request->send(200, "application/json", res);
+  });
+
+  server.on(
+    "/automation/future/add", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (!deserializeJson(doc, data, len)) {
+        for (int i = 0; i < MAX_FUTURE_SCHEDULES; i++) {
+          if (!futureSchedules[i].active) {
+            String d = doc["date"] | "";
+            String t = doc["time"] | "";
+            if (d.length() >= 10 && t.length() >= 5) {
+              futureSchedules[i].year = d.substring(0, 4).toInt();
+              futureSchedules[i].month = d.substring(5, 7).toInt();
+              futureSchedules[i].day = d.substring(8, 10).toInt();
+              futureSchedules[i].hour = t.substring(0, 2).toInt();
+              futureSchedules[i].minute = t.substring(3, 5).toInt();
+              futureSchedules[i].turnOn = (String(doc["action"] | "on") == "on");
+              futureSchedules[i].active = true;
+              saveSchedulesToNVS();
+              request->send(200, "application/json", "{\"success\":true}");
+              return;
+            }
+          }
+        }
+      }
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"Schedule list full\"}");
+    });
+
+  server.on(
+    "/automation/future/delete", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<128> doc;
+      if (!deserializeJson(doc, data, len)) {
+        int targetIdx = doc["index"] | -1;
+        int activeCounter = 0;
+        for (int i = 0; i < MAX_FUTURE_SCHEDULES; i++) {
+          if (futureSchedules[i].active) {
+            if (activeCounter == targetIdx) {
+              futureSchedules[i].active = false;
+              saveSchedulesToNVS();
+              break;
+            }
+            activeCounter++;
+          }
+        }
+      }
+      request->send(200, "application/json", "{\"success\":true}");
+    });
+
+  // User Accounts Management
+  server.on("/users/list", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<512> doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_USERS; i++) {
+      if (users[i].active) {
+        JsonObject o = arr.createNestedObject();
+        o["username"] = users[i].username;
+        o["password"] = users[i].password;
+        o["role"] = users[i].role;
+      }
+    }
+    String res;
+    serializeJson(arr, res);
+    request->send(200, "application/json", res);
+  });
+
+  server.on(
+    "/users/add", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"success\":false}");
+        return;
+      }
+      String adminU = doc["adminUser"] | "";
+      String adminP = doc["adminPass"] | "";
+      String newU = doc["username"] | "";
+      String newP = doc["password"] | "";
+      String role = doc["role"] | "user";
+
+      if (!verifyAdminCreds(adminU, adminP)) {
+        request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+        return;
+      }
+      for (int i = 0; i < MAX_USERS; i++) {
+        if (users[i].active && newU == users[i].username) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"User already exists\"}");
           return;
         }
-        String username = doc["username"] | "";
-        // Ensure at least one admin remains
-        int adminCount = 0;
-        int deleteIdx = -1;
-        for (int i = 0; i < userCount; i++) {
-          if (strcmp(users[i].role, "admin") == 0) adminCount++;
-          if (username == users[i].username) deleteIdx = i;
-        }
-        if (deleteIdx < 0) {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"User not found\"}");
+      }
+      for (int i = 0; i < MAX_USERS; i++) {
+        if (!users[i].active) {
+          users[i].active = true;
+          strncpy(users[i].username, newU.c_str(), 19);
+          strncpy(users[i].password, newP.c_str(), 19);
+          strncpy(users[i].role, role.c_str(), 9);
+          saveUsers();
+          request->send(200, "application/json", "{\"success\":true}");
           return;
         }
-        if (strcmp(users[deleteIdx].role, "admin") == 0 && adminCount <= 1) {
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Cannot delete last admin\"}");
-          return;
+      }
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"Maximum user limit reached\"}");
+    });
+
+  server.on(
+    "/users/delete", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"success\":false}");
+        return;
+      }
+      String adminU = doc["adminUser"] | "";
+      String adminP = doc["adminPass"] | "";
+      String target = doc["username"] | "";
+
+      if (!verifyAdminCreds(adminU, adminP)) {
+        request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+        return;
+      }
+
+      int adminCount = 0;
+      int targetIdx = -1;
+      for (int i = 0; i < MAX_USERS; i++) {
+        if (users[i].active) {
+          if (String(users[i].role) == "admin") adminCount++;
+          if (target == users[i].username) targetIdx = i;
         }
-        for (int i = deleteIdx; i < userCount - 1; i++) users[i] = users[i + 1];
-        userCount--;
-        saveUsersToFile();
-        playBeep(1);
-        request->send(200, "application/json", "{\"success\":true}");
-      } else request->send(400, "application/json", "{\"success\":false}"); });
+      }
+      if (targetIdx == -1) {
+        request->send(404, "application/json", "{\"success\":false,\"error\":\"User not found\"}");
+        return;
+      }
+      if (String(users[targetIdx].role) == "admin" && adminCount <= 1) {
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Cannot remove the last admin\"}");
+        return;
+      }
+      users[targetIdx].active = false;
+      saveUsers();
+      request->send(200, "application/json", "{\"success\":true}");
+    });
 
   server.begin();
-  webServerStarted = true;
-  Serial.println("Web server started successfully");
+  Serial.println("[WebServer] AsyncWebServer started on port 80");
 }
 
-// Add this function to check WiFi and start server if needed
-// Enhanced checkWiFiAndStartServer() with proper notification display
-void checkWiFiAndStartServer()
-{
-  static unsigned long lastCheck = 0;
+void maintainWiFiAndServices() {
   static bool wasConnected = false;
-  static bool reconnecting = false;
-
-  // Check every 5 seconds
-  if (millis() - lastCheck < 5000)
-    return;
-  lastCheck = millis();
+  static unsigned long lastReconnectTry = 0;
 
   bool isConnected = (WiFi.status() == WL_CONNECTED);
 
-  // WiFi just connected (first time or reconnected)
-  if (isConnected && !wasConnected)
-  {
-    Serial.println("WiFi connected! Starting services...");
-
-    if (!webServerStarted)
-    {
-      setupWebServer();
-    }
-
-    // ✅ Show notification on OLED - PROPERLY refresh display
-    // if (!menuActive) {
-    //   u8g2.clearBuffer();
-    //   u8g2.setFont(u8g2_font_6x12_tf);
-    //   u8g2.drawStr(0, 12, "WiFi Connected!");
-    //   u8g2.drawStr(0, 24, "Server Started");
-    //   u8g2.drawStr(0, 36, "IP:");
-    //   u8g2.drawStr(0, 48, WiFi.localIP().toString().c_str());
-    //   u8g2.sendBuffer();
-    //   delay(2000);
-
-    //   // ✅ IMPORTANT: Force complete redraw
-    //   u8g2.clearBuffer();  // Clear everything first
-    //   displayLayout();     // Draw borders
-    //   displayUnits();      // Draw unit labels
-    //   u8g2.sendBuffer();   // ✅ Send buffer BEFORE statusbar
-
-    //   // ✅ Now draw statusbar separately
-    //   displayStatusbar();
-    // }
-
-    // Start Firebase task if enabled
-    if (fbSettings.enabled && strlen(fbSettings.host) > 0 && firebaseTask == NULL)
-    {
-      Serial.println("Starting Firebase task...");
-      xTaskCreatePinnedToCore(
-          firebaseTaskFunction,
-          "FirebaseTask",
-          8192,
-          NULL,
-          1,
-          &firebaseTask,
-          0);
-    }
-
-    reconnecting = false;
+  if (isConnected && !wasConnected) {
+    wasConnected = true;
+    Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    setupMDNS();
+    pendingNtpSync = true;
+  } else if (!isConnected && wasConnected) {
+    wasConnected = false;
+    Serial.println("[WiFi] Connection lost. Will retry in background...");
   }
 
-  // WiFi disconnected - try to reconnect
-  if (!isConnected && wasConnected)
-  {
-    Serial.println("WiFi disconnected - will attempt reconnection");
-
-    // Stop Firebase task
-    if (firebaseTask != NULL)
-    {
-      vTaskDelete(firebaseTask);
-      firebaseTask = NULL;
-      Serial.println("Firebase task stopped");
-    }
-
-    reconnecting = true;
+  // Non-blocking background reconnect every 20 seconds
+  if (!isConnected && (millis() - lastReconnectTry >= 20000UL)) {
+    lastReconnectTry = millis();
+    WiFi.reconnect();
   }
 
-  // ✅ Active reconnection attempts when disconnected
-  if (!isConnected && reconnecting)
-  {
-    static unsigned long lastReconnectAttempt = 0;
+  // Process deferred tasks safely in loop()
+  if (pendingMdnsRestart) {
+    pendingMdnsRestart = false;
+    setupMDNS();
+  }
 
-    // Try reconnecting every 30 seconds
-    if (millis() - lastReconnectAttempt > 30000)
-    {
-      lastReconnectAttempt = millis();
+  if (pendingWiFiDisconnect) {
+    pendingWiFiDisconnect = false;
+    WiFi.disconnect(false, false);
+  }
 
-      Serial.println("Attempting WiFi reconnection...");
+  if (pendingWiFiForget) {
+    pendingWiFiForget = false;
+    WiFiManager wm;
+    wm.resetSettings();
+    WiFi.disconnect(true, true);
+    pendingRestart = true;
+    restartScheduledMillis = millis() + 500;
+  }
 
-      // ✅ Show reconnecting status with proper display refresh
-      if (!menuActive)
-      {
-        // Force reconnection attempt
-        WiFi.disconnect();
-        delay(100);
-        WiFi.begin(); // ✅ Reconnect to saved credentials
+  if (pendingWiFiPortal) {
+    pendingWiFiPortal = false;
+    server.end();  // Temporarily free port 80 for WiFiManager portal
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(0, 14, "AP: ESP.EnergyLog");
+    u8g2.drawStr(0, 28, "IP: 192.168.4.1");
+    u8g2.drawStr(0, 46, "Portal Open (60s)");
+    u8g2.sendBuffer();
 
-        // Redraw layout after reconnection attempt
-        u8g2.clearBuffer();
-        displayLayout();
-        displayUnits();
-        u8g2.sendBuffer();
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(60);
+    wm.startConfigPortal("ESP.EnergyLog");
 
-        // Update statusbar
-        displayStatusbar();
-      }
-      else
-      {
-        // Just reconnect without display update if in menu
-        WiFi.disconnect();
-        delay(100);
-        WiFi.begin();
-      }
+    WiFi.mode(WIFI_STA);
+    WiFi.begin();
+    server.begin();  // Relaunch AsyncWebServer cleanly
+    setupMDNS();
+    showToastLCD("WiFi Portal", "Closed", 1200, UI_DASHBOARD);
+  }
+
+  if (resetKwhRequested) {
+    resetKwhRequested = false;
+    if (recordEnergyResetTimestamp()) {
+      pzem.resetEnergy();
+      portENTER_CRITICAL(&measureMux);
+      readings.energy = 0.0f;
+      readings.totalDays = 0.0f;
+      portEXIT_CRITICAL(&measureMux);
+      showToastLCD("Energy Reset!", lastResetTimeStr, 1400, UI_DASHBOARD);
+    } else {
+      triggerBeep(150, 2, 80);
+      showToastLCD("Reset Failed!", "NTP Not Synced", 1500, UI_DASHBOARD);
     }
   }
 
-  wasConnected = isConnected;
+  if (resetDaysRequested) {
+    resetDaysRequested = false;
+    if (recordEnergyResetTimestamp()) {
+      portENTER_CRITICAL(&measureMux);
+      readings.totalDays = 0.0f;
+      portEXIT_CRITICAL(&measureMux);
+      showToastLCD("Last Billing", "Reset Done!", 1200, UI_DASHBOARD);
+    } else {
+      triggerBeep(150, 2, 80);
+      showToastLCD("Reset Failed!", "NTP Not Synced", 1500, UI_DASHBOARD);
+    }
+  }
+
+  if (pendingFactoryData) {
+    pendingFactoryData = false;
+    if (ntpSynced) {
+      recordEnergyResetTimestamp();
+    } else {
+      lastResetEpoch = 0;
+      strcpy(lastResetTimeStr, "Not Reset");
+      preferences.remove("rstEpoch");
+      preferences.remove("rstTime");
+    }
+    pzem.resetEnergy();
+    kwhDays = 0.0f;
+    memset(dailySchedules, 0, sizeof(dailySchedules));
+    memset(futureSchedules, 0, sizeof(futureSchedules));
+    saveSchedulesToNVS();
+    showToastLCD("All Data", "Reset Done!", 1200, UI_DASHBOARD);
+  }
+
+  if (pendingFactoryAll) {
+    pendingFactoryAll = false;
+    executeFullFactoryReset();
+  }
+
+  if (pendingRestart && (long)(millis() - restartScheduledMillis) >= 0) {
+    pendingRestart = false;
+    ESP.restart();
+  }
 }
 
-// 12. Satety Features
-void checkSafetyAlerts()
-{
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck < (settings.alertInterval * 1000))
-    return;
-  lastCheck = millis();
-
-  // Get measurements once
+// ============================================================================
+// SINGLE-PASS OLED DISPLAY & NON-BLOCKING MENU ENGINE
+// ============================================================================
+void renderDashboardFrame() {
   portENTER_CRITICAL(&measureMux);
-  Measurements current = readings;
+  Measurements cur = readings;
   portEXIT_CRITICAL(&measureMux);
 
-  // Check alerts without repeated mutex locks
-  bool alertsTriggered = ((settings.highVoltageAlert && current.voltage > settings.voltHigh) || (settings.lowVoltageAlert && current.voltage < settings.voltLow) || (settings.highPowerAlert && current.power > settings.powerHigh) || (settings.lowPowerAlert && current.power < settings.powerLow) || (settings.highFreqAlert && current.frequency > settings.freqHigh) || (settings.lowFreqAlert && current.frequency < settings.freqLow));
+  u8g2.clearBuffer();
 
-  if (alertsTriggered)
-  {
-    digitalWrite(BUZZER_PIN, HIGH);
-    vTaskDelay(ALERT_BEEP_DURATION / portTICK_PERIOD_MS);
-    digitalWrite(BUZZER_PIN, LOW);
-    vTaskDelay(ALERT_BEEP_PAUSE / portTICK_PERIOD_MS);
-    digitalWrite(BUZZER_PIN, HIGH);
-    vTaskDelay(ALERT_BEEP_DURATION / portTICK_PERIOD_MS);
-    digitalWrite(BUZZER_PIN, LOW);
-    vTaskDelay(ALERT_BEEP_PAUSE / portTICK_PERIOD_MS);
-    digitalWrite(BUZZER_PIN, HIGH);
-    vTaskDelay(ALERT_BEEP_DURATION / portTICK_PERIOD_MS);
-    digitalWrite(BUZZER_PIN, LOW);
-    vTaskDelay(ALERT_BEEP_PAUSE / portTICK_PERIOD_MS);
+  // 1. Layout Grid Lines
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawLine(54, 1, 54, 62);
+  u8g2.drawLine(1, 39, 126, 39);
+
+  // 2. Unit Labels
+  u8g2.setFont(u8g2_font_t0_11_tr);
+  u8g2.drawStr(46, 12, "V");
+  u8g2.drawStr(113, 12, "PF");
+  u8g2.drawStr(46, 24, "A");
+  u8g2.drawStr(118, 24, "W");
+  u8g2.drawStr(40, 36, "Hz");
+  u8g2.drawStr(107, 36, "kWh");
+  u8g2.drawStr(46, 50, "H");
+  u8g2.drawStr(46, 61, "D");
+
+  // 3. Telemetry Values
+  char buf[16];
+  dtostrf(cur.voltage, 0, 1, buf);
+  u8g2.drawStr(3, 12, buf);
+  dtostrf(cur.current, 0, 2, buf);
+  u8g2.drawStr(3, 24, buf);
+  dtostrf(cur.frequency, 0, 2, buf);
+  u8g2.drawStr(3, 36, buf);
+  dtostrf(cur.uptime, 0, 1, buf);
+  u8g2.drawStr(3, 50, buf);
+  dtostrf(cur.totalDays, 0, 1, buf);
+  u8g2.drawStr(3, 61, buf);
+  dtostrf(cur.pf, 0, 2, buf);
+  u8g2.drawStr(59, 12, buf);
+  dtostrf(cur.power, 0, 1, buf);
+  u8g2.drawStr(59, 24, buf);
+  dtostrf(cur.energy, 0, 2, buf);
+  u8g2.drawStr(59, 36, buf);
+
+  // 4. Date/Time or Protection Status (Top right of bottom panel)
+  if (shouldTurnOff) {
+    u8g2.drawStr(58, 50, protectionStatusText);
+  } else {
+    struct tm ti;
+    if (ntpSynced && getLocalTime(&ti, 0)) {
+      char dStr[8], tStr[8];
+      strftime(dStr, sizeof(dStr), "%d/%m", &ti);
+      strftime(tStr, sizeof(tStr), "%H:%M", &ti);
+      u8g2.drawStr(58, 50, dStr);
+      u8g2.drawStr(94, 50, tStr);
+    } else {
+      u8g2.drawStr(58, 50, "--/--");
+      u8g2.drawStr(94, 50, "--:--");
+    }
+  }
+
+  // 5. Status Bar Icons (Bottom right)
+  if (WiFi.status() == WL_CONNECTED) u8g2.drawStr(59, 61, "W");
+  if (settings.mdnsEnabled) u8g2.drawStr(71, 61, "M");
+  if (settings.nodeRedEnabled) u8g2.drawStr(83, 61, "R");
+  if (settings.afpcEnabled) u8g2.drawStr(94, 61, "C");
+  if (settings.highVProtec || settings.LowVProtec || settings.highPProtec || settings.highHzProtec || settings.lowHzProtec) {
+    u8g2.drawStr(106, 61, "P");
+  }
+  if (settings.highVoltageAlert || settings.lowVoltageAlert || settings.highPowerAlert || settings.lowPowerAlert || settings.highFreqAlert || settings.lowFreqAlert) {
+    u8g2.drawStr(118, 61, "A");
+  }
+
+  // Single SPI transfer for the entire screen!
+  u8g2.sendBuffer();
+}
+
+void drawSubmenuRightValue(int mainIdx, int subIdx) {
+  char val[16] = "";
+  switch (mainIdx) {
+    case 1:  // WiFi
+      if (subIdx == 2) strcpy(val, WiFi.status() == WL_CONNECTED ? "ON" : "---");
+      break;
+    case 2:  // mDNS
+      if (subIdx == 1) strcpy(val, settings.mdnsEnabled ? "ON" : "OFF");
+      break;
+    case 3:  // Node-RED
+      if (subIdx == 1) strcpy(val, settings.nodeRedEnabled ? "ON" : "OFF");
+      else if (subIdx == 2) strcpy(val, nodeRedConnected ? "OK" : "---");
+      break;
+    case 4:  // AFPC
+      if (subIdx == 1) strcpy(val, settings.afpcEnabled ? "ON" : "OFF");
+      else if (subIdx == 2) snprintf(val, sizeof(val), "%.2f", settings.targetFactor);
+      else if (subIdx == 3) snprintf(val, sizeof(val), "%.1f", settings.mfdPerChannel);
+      break;
+    case 5:  // Startup
+      if (subIdx == 1) snprintf(val, sizeof(val), "%ds", settings.startupTime);
+      break;
+    case 6:  // Intervals
+      if (subIdx == 1) snprintf(val, sizeof(val), "%ds", settings.espShareInterval);
+      else if (subIdx == 2) snprintf(val, sizeof(val), "%ds", settings.nodeRedInterval);
+      else if (subIdx == 3) snprintf(val, sizeof(val), "%ds", settings.pzemInterval);
+      else if (subIdx == 4) snprintf(val, sizeof(val), "%ds", settings.alertInterval);
+      else if (subIdx == 5) snprintf(val, sizeof(val), "%ds", settings.protectionDelay);
+      break;
+    case 7:  // Thresholds
+      if (subIdx == 1) snprintf(val, sizeof(val), "%dV", (int)settings.voltHigh);
+      else if (subIdx == 2) snprintf(val, sizeof(val), "%dV", (int)settings.voltLow);
+      else if (subIdx == 3) snprintf(val, sizeof(val), "%dW", (int)settings.powerHigh);
+      else if (subIdx == 4) snprintf(val, sizeof(val), "%dW", (int)settings.powerLow);
+      else if (subIdx == 5) snprintf(val, sizeof(val), "%.2f", settings.freqHigh);
+      else if (subIdx == 6) snprintf(val, sizeof(val), "%.2f", settings.freqLow);
+      else if (subIdx == 7) snprintf(val, sizeof(val), "%dkWh", settings.maxkWh);
+      else if (subIdx == 8) snprintf(val, sizeof(val), "%dW", settings.afpcLowWatt);
+      else if (subIdx == 9) snprintf(val, sizeof(val), "%dW", settings.afpcHighWatt);
+      break;
+    case 8:  // Alerts
+      {
+        bool* arr[] = { nullptr, &settings.highVoltageAlert, &settings.lowVoltageAlert, &settings.highPowerAlert, &settings.lowPowerAlert, &settings.lowFreqAlert, &settings.highFreqAlert };
+        if (subIdx >= 1 && subIdx <= 6) strcpy(val, *arr[subIdx] ? "ON" : "OFF");
+      }
+      break;
+    case 9:  // Protections
+      {
+        bool* arr[] = { nullptr, &settings.highVProtec, &settings.LowVProtec, &settings.highPProtec, &settings.highHzProtec, &settings.lowHzProtec };
+        if (subIdx >= 1 && subIdx <= 5) strcpy(val, *arr[subIdx] ? "ON" : "OFF");
+      }
+      break;
+    case 10:  // Main Output
+      if (subIdx == 1) strcpy(val, settings.mainOutput ? "ON" : "OFF");
+      else if (subIdx == 2) strcpy(val, settings.kWhSaver ? "ON" : "OFF");
+      break;
+  }
+  if (strlen(val) > 0) {
+    int w = u8g2.getStrWidth(val);
+    u8g2.drawStr(126 - w, 11, val);
   }
 }
 
-// Days Tracking
-void saveTotalDays()
-{
-  static unsigned long lastSave = 0;
-  static float lastSavedValue = -1.0; // Track last saved value
+void startIntEditor(const char* title, int* target, int minV, int maxV, int stepV, char unit) {
+  editCtx.title = title;
+  editCtx.intTarget = target;
+  editCtx.intTemp = *target;
+  editCtx.intMin = minV;
+  editCtx.intMax = maxV;
+  editCtx.intStep = stepV;
+  editCtx.unit = unit;
+  setEncoderPos((*target) / stepV);
+  uiState = UI_EDIT_INT;
+}
 
+void startFloatEditor(const char* title, float* target, float minV, float maxV, float scale, char unit) {
+  editCtx.title = title;
+  editCtx.floatTarget = target;
+  editCtx.floatTemp = *target;
+  editCtx.floatMin = minV;
+  editCtx.floatMax = maxV;
+  editCtx.floatScale = scale;
+  editCtx.unit = unit;
+  setEncoderPos(round((*target) * scale));
+  uiState = UI_EDIT_FLOAT;
+}
+
+void handleSubmenuAction(int mainIdx, int subIdx) {
+  switch (mainIdx) {
+    case 1:  // WiFi Setup
+      if (subIdx == 1) pendingWiFiPortal = true;
+      else if (subIdx == 2) {
+        strcpy(infoLine1, WiFi.status() == WL_CONNECTED ? "WiFi: Connected" : "WiFi: Offline");
+        strncpy(infoLine2, WiFi.SSID().c_str(), 23);
+        strncpy(infoLine3, WiFi.localIP().toString().c_str(), 23);
+        snprintf(infoLine4, 23, "RSSI: %d dBm", WiFi.RSSI());
+        uiReturnState = UI_SUB_MENU;
+        uiState = UI_INFO_VIEW;
+      } else if (subIdx == 3) {
+        pendingWiFiDisconnect = true;
+        showToastLCD("WiFi", "Disconnected!", 1200, UI_SUB_MENU);
+      } else if (subIdx == 4) {
+        pendingWiFiForget = true;
+        showToastLCD("WiFi Cleared", "Restarting...", 1200, UI_DASHBOARD);
+      }
+      break;
+
+    case 2:  // mDNS
+      if (subIdx == 1) {
+        settings.mdnsEnabled = !settings.mdnsEnabled;
+        saveSettings();
+        pendingMdnsRestart = true;
+        showToastLCD("mDNS Responder", settings.mdnsEnabled ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
+      } else if (subIdx == 2) {
+        settings.mdnsEnabled = true;
+        strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+        saveSettings();
+        pendingMdnsRestart = true;
+        showToastLCD("mDNS Reset:", settings.mdnsHostname, 1400, UI_SUB_MENU);
+      } else if (subIdx == 3) {
+        strcpy(infoLine1, "mDNS Hostname:");
+        snprintf(infoLine2, 23, "%s.local", settings.mdnsHostname);
+        snprintf(infoLine3, 23, "Status: %s", settings.mdnsEnabled ? "Active" : "OFF");
+        strcpy(infoLine4, "Click to exit");
+        uiReturnState = UI_SUB_MENU;
+        uiState = UI_INFO_VIEW;
+      }
+      break;
+
+    case 3:  // Node-RED
+      if (subIdx == 1) {
+        settings.nodeRedEnabled = !settings.nodeRedEnabled;
+        saveSettings();
+        showToastLCD("Node-RED", settings.nodeRedEnabled ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
+      } else if (subIdx == 2) {
+        strcpy(infoLine1, "Node-RED Status");
+        strncpy(infoLine2, settings.nodeRedIP, 23);
+        strcpy(infoLine3, nodeRedConnected ? "Connected" : "Unreachable");
+        strncpy(infoLine4, lastNodeRedResponse.c_str(), 23);
+        uiReturnState = UI_SUB_MENU;
+        uiState = UI_INFO_VIEW;
+      }
+      break;
+
+    case 4:  // AFPC
+      if (subIdx == 1) {
+        settings.afpcEnabled = !settings.afpcEnabled;
+        saveSettings();
+        showToastLCD("AFPC Control", settings.afpcEnabled ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
+      } else if (subIdx == 2) {
+        startFloatEditor("Target PF", &settings.targetFactor, 0.50f, 0.99f, 100.0f, ' ');
+      } else if (subIdx == 3) {
+        startFloatEditor("MFD / Channel", &settings.mfdPerChannel, 0.1f, 15.0f, 10.0f, 'u');
+      }
+      break;
+
+    case 5:  // Startup
+      if (subIdx == 1) startIntEditor("Startup Delay", &settings.startupTime, 0, 300, 5, 's');
+      break;
+
+    case 6:  // Intervals
+      if (subIdx == 1) startIntEditor("ESP Sharing", &settings.espShareInterval, 1, 300, 1, 's');
+      else if (subIdx == 2) startIntEditor("Node-RED Intv", &settings.nodeRedInterval, 5, 300, 5, 's');
+      else if (subIdx == 3) startIntEditor("Sensor Read", &settings.pzemInterval, 1, 60, 1, 's');
+      else if (subIdx == 4) startIntEditor("Alert Repeat", &settings.alertInterval, 15, 600, 5, 's');
+      else if (subIdx == 5) startIntEditor("Protec. Delay", &settings.protectionDelay, 60, 3600, 60, 's');
+      break;
+
+    case 7:  // Thresholds
+      {
+        static int tempHolder = 0;
+        if (subIdx == 1) {
+          tempHolder = settings.voltHigh;
+          startIntEditor("Voltage High", &tempHolder, 150, 280, 1, 'V');
+          editCtx.onConfirm = []() {
+            settings.voltHigh = *editCtx.intTarget;
+          };
+        } else if (subIdx == 2) {
+          tempHolder = settings.voltLow;
+          startIntEditor("Voltage Low", &tempHolder, 120, 250, 1, 'V');
+          editCtx.onConfirm = []() {
+            settings.voltLow = *editCtx.intTarget;
+          };
+        } else if (subIdx == 3) {
+          tempHolder = settings.powerHigh;
+          startIntEditor("Power High", &tempHolder, 100, 9900, 100, 'W');
+          editCtx.onConfirm = []() {
+            settings.powerHigh = *editCtx.intTarget;
+          };
+        } else if (subIdx == 4) {
+          tempHolder = settings.powerLow;
+          startIntEditor("Power Low", &tempHolder, 100, 9900, 100, 'W');
+          editCtx.onConfirm = []() {
+            settings.powerLow = *editCtx.intTarget;
+          };
+        } else if (subIdx == 5) startFloatEditor("Freq. High", &settings.freqHigh, 49.00f, 51.00f, 100.0f, 'H');
+        else if (subIdx == 6) startFloatEditor("Freq. Low", &settings.freqLow, 49.00f, 51.00f, 100.0f, 'H');
+        else if (subIdx == 7) startIntEditor("Max kWh", &settings.maxkWh, 1, 9000, 5, 'U');
+        else if (subIdx == 8) startIntEditor("AFPC Low W", &settings.afpcLowWatt, 1, 9900, 10, 'W');
+        else if (subIdx == 9) startIntEditor("AFPC High W", &settings.afpcHighWatt, 100, 9900, 50, 'W');
+      }
+      break;
+
+    case 8:  // Alerts Toggle
+      {
+        bool* arr[] = { nullptr, &settings.highVoltageAlert, &settings.lowVoltageAlert, &settings.highPowerAlert, &settings.lowPowerAlert, &settings.lowFreqAlert, &settings.highFreqAlert };
+        if (subIdx >= 1 && subIdx <= 6) {
+          *arr[subIdx] = !(*arr[subIdx]);
+          saveSettings();
+          showToastLCD(safetyAlertSubmenu[subIdx], *arr[subIdx] ? "Alert ON" : "Alert OFF", 900, UI_SUB_MENU);
+        }
+      }
+      break;
+
+    case 9:  // Protections Toggle
+      {
+        bool* arr[] = { nullptr, &settings.highVProtec, &settings.LowVProtec, &settings.highPProtec, &settings.highHzProtec, &settings.lowHzProtec };
+        if (subIdx >= 1 && subIdx <= 5) {
+          *arr[subIdx] = !(*arr[subIdx]);
+          saveSettings();
+          showToastLCD(safetyProtectionSubmenu[subIdx], *arr[subIdx] ? "Protec. ON" : "Protec. OFF", 900, UI_SUB_MENU);
+        }
+      }
+      break;
+
+    case 10:  // Main Output
+      if (subIdx == 1) {
+        settings.mainOutput = !settings.mainOutput;
+        if (settings.mainOutput) {
+          protectionWasActive = false;
+          waitingForDelay = false;
+        }
+        saveSettings();
+        showToastLCD("Main Output", settings.mainOutput ? "Turned ON" : "Turned OFF", 1000, UI_SUB_MENU);
+      } else if (subIdx == 2) {
+        settings.kWhSaver = !settings.kWhSaver;
+        saveSettings();
+        showToastLCD("kWh Saver", settings.kWhSaver ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
+      }
+      break;
+
+    case 12:  // Clear Data
+      if (subIdx == 1) {
+        if (!ntpSynced) {
+          triggerBeep(150, 2, 80);
+          showToastLCD("NTP Not Synced!", "Sync Time First", 1500, UI_SUB_MENU);
+        } else {
+          resetKwhRequested = true;
+        }
+      } else if (subIdx == 2) {
+        // Show Last Billing Reset Timestamp & Elapsed Days on LCD
+        strcpy(infoLine1, "Last Billing:");
+        strncpy(infoLine2, lastResetTimeStr, 23);
+        snprintf(infoLine3, 23, "Elapsed: %.1f Days", kwhDays);
+        snprintf(infoLine4, 23, "Energy: %.2f kWh", readings.energy);
+        uiReturnState = UI_SUB_MENU;
+        uiState = UI_INFO_VIEW;
+      }
+      break;
+
+    case 13:  // Factory Reset
+      if (subIdx == 1) pendingFactoryData = true;
+      else if (subIdx == 2) pendingFactoryAll = true;
+      break;
+  }
+}
+
+void updateDisplayAndUI() {
   unsigned long now = millis();
 
-  // Save conditions:
-  // 1. Regular interval (10 minutes)
-  // 2. Significant change (>0.1 days difference)
-  // 3. First time initialization
-
-  bool shouldSave = false;
-
-  // Regular interval save
-  if (now - lastSave >= TOTAL_DAYS_INTERVAL)
-  {
-    shouldSave = true;
+  // If BOOT button is held for > 500ms, override display with Factory Reset Countdown
+  if (bootBtnHolding && (now - bootBtnPressStart >= 500UL)) {
+    int rem = 5 - ((now - bootBtnPressStart) / 1000UL);
+    u8g2.clearBuffer();
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(14, 20, "FACTORY RESET");
+    u8g2.setFont(u8g2_font_6x12_tf);
+    char cStr[24];
+    snprintf(cStr, sizeof(cStr), "Hold BOOT: %d sec", max(0, rem));
+    u8g2.drawStr(18, 40, cStr);
+    int barW = map(now - bootBtnPressStart, 500, 5000, 0, 108);
+    u8g2.drawFrame(10, 48, 108, 8);
+    u8g2.drawBox(10, 48, constrain(barW, 0, 108), 8);
+    u8g2.sendBuffer();
+    return;
   }
 
-  // Significant change save (prevents data loss on unexpected reboot)
-  if (lastSavedValue < 0 || abs(kwhDays - lastSavedValue) >= 0.1)
-  {
-    shouldSave = true;
+  // Auto-exit menu on inactivity
+  if (uiState != UI_DASHBOARD && uiState != UI_STARTUP_SAFETY && (now - lastMenuActivityMillis >= MENU_TIMEOUT_MS)) {
+    uiState = UI_DASHBOARD;
   }
 
-  if (shouldSave)
-  {
-    preferences.putFloat("days", kwhDays);
-    lastSave = now;
-    lastSavedValue = kwhDays;
+  // 1. Startup Safety Check State (Strictly requires valid PZEM reading!)
+  if (uiState == UI_STARTUP_SAFETY) {
+    portENTER_CRITICAL(&measureMux);
+    Measurements cur = readings;
+    portEXIT_CRITICAL(&measureMux);
 
-    Serial.printf("Days saved to flash: %.2f (auto-save)\n", kwhDays);
+    // Sensor MUST be valid AND within thresholds to be safe
+    bool vOk = cur.valid && (cur.voltage >= settings.voltLow && cur.voltage <= settings.voltHigh);
+    bool fOk = cur.valid && (cur.frequency >= settings.freqLow && cur.frequency <= settings.freqHigh);
+    bool safe = cur.valid && vOk && fOk;
+
+    if (now - lastStartupTickMillis >= 1000UL) {
+      lastStartupTickMillis = now;
+      if (safe && startupRemainingSec > 0) {
+        startupRemainingSec--;
+      }
+    }
+
+    // Debounce RESET_BTN (must hold for 300ms) so boot transients never skip safety check
+    static unsigned long resetHighStart = 0;
+    bool manualResetOverride = false;
+    if (digitalRead(RESET_BTN) == HIGH) {
+      if (resetHighStart == 0) resetHighStart = now;
+      else if (now - resetHighStart >= 300UL) manualResetOverride = true;
+    } else {
+      resetHighStart = 0;
+    }
+
+    if ((safe && startupRemainingSec <= 0) || manualResetOverride || checkEncoderButtonClick()) {
+      u8g2.clearBuffer();
+      u8g2.setFont(u8g2_font_6x12_tf);
+      u8g2.drawStr(31, 35, "Starting...");
+      u8g2.sendBuffer();
+
+      digitalWrite(BUZZER_PIN, HIGH);
+      delay(1500);
+      digitalWrite(BUZZER_PIN, LOW);
+      delay(500);
+
+      startupCheckCompleted = true;
+      uiState = UI_DASHBOARD;
+      return;
+    }
+
+    static unsigned long lastStartupDraw = 0;
+    if (now - lastStartupDraw >= 200UL) {
+      lastStartupDraw = now;
+      u8g2.clearBuffer();
+      u8g2.setFont(u8g2_font_6x12_tf);
+
+      if (!cur.valid) {
+        u8g2.drawStr(2, 14, "PZEM SENSOR WAIT...");
+        u8g2.drawStr(2, 28, "Checking AC Input");
+        u8g2.drawStr(2, 58, "Push/Click Override");
+      } else {
+        char vBuf[24], fBuf[24];
+        const char* vStat = (cur.voltage > settings.voltHigh) ? "high V" : ((cur.voltage < settings.voltLow) ? "low V" : "normal");
+        const char* fStat = (cur.frequency > settings.freqHigh) ? "high fre." : ((cur.frequency < settings.freqLow) ? "undr fre." : "normal");
+
+        snprintf(vBuf, sizeof(vBuf), "%-9s %6.2f V", vStat, cur.voltage);
+        snprintf(fBuf, sizeof(fBuf), "%-9s %5.2f Hz", fStat, cur.frequency);
+        u8g2.drawStr(0, 10, vBuf);
+        u8g2.drawStr(0, 23, fBuf);
+
+        if (safe) {
+          int totalT = max(1, settings.startupTime);
+          int barW = map(totalT - startupRemainingSec, 0, totalT, 0, 120);
+          u8g2.drawFrame(4, 38, 120, 6);
+          if (barW > 0) {
+            u8g2.drawBox(4, 38, constrain(barW, 0, 120), 6);
+          }
+          char tBuf[24];
+          snprintf(tBuf, sizeof(tBuf), "wait for...   %d s", startupRemainingSec);
+          u8g2.drawStr(4, 58, tBuf);
+        } else {
+          u8g2.drawStr(0, 58, "press push to turn on!");
+        }
+      }
+      u8g2.sendBuffer();
+    }
+    return;
+  }
+
+  // 2. Main Dashboard State
+  if (uiState == UI_DASHBOARD) {
+    if (checkEncoderButtonClick()) {
+      triggerBeep(45, 1, 0);
+      currentMainMenuIdx = 0;
+      setEncoderPos(0);
+      uiState = UI_MAIN_MENU;
+      return;
+    }
+    static unsigned long lastDashDraw = 0;
+    if (now - lastDashDraw >= 500UL) {
+      lastDashDraw = now;
+      renderDashboardFrame();
+    }
+    return;
+  }
+
+  // 3. Toast Notification State
+  if (uiState == UI_TOAST) {
+    if (now >= toastEndMillis || checkEncoderButtonClick()) {
+      uiState = uiReturnState;
+      return;
+    }
+    u8g2.clearBuffer();
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(8, 28, toastMsgLine1);
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(8, 46, toastMsgLine2);
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 4. Info Screen State
+  if (uiState == UI_INFO_VIEW) {
+    if (checkEncoderButtonClick()) {
+      triggerBeep(40, 1, 0);
+      uiState = uiReturnState;
+      return;
+    }
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(0, 13, infoLine1);
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(0, 29, infoLine2);
+    u8g2.drawStr(0, 43, infoLine3);
+    u8g2.drawStr(0, 59, infoLine4);
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 5. Main Menu Navigation
+  if (uiState == UI_MAIN_MENU) {
+    long pos = getEncoderPos();
+    if (pos != lastEncoderPos) {
+      currentMainMenuIdx = constrain(currentMainMenuIdx + (pos > lastEncoderPos ? 1 : -1), 0, mainMenuCount - 1);
+      lastEncoderPos = pos;
+      lastMenuActivityMillis = now;
+      triggerBeep(20, 1, 0);
+    }
+
+    if (checkEncoderButtonClick()) {
+      triggerBeep(45, 1, 0);
+      if (currentMainMenuIdx == 0) {
+        uiState = UI_DASHBOARD;
+        return;
+      } else if (currentMainMenuIdx == 11) {
+        pendingNtpSync = true;
+        showToastLCD("NTP Clock", "Sync Requested", 1200, UI_MAIN_MENU);
+        return;
+      } else if (currentMainMenuIdx == 14) {
+        pendingRestart = true;
+        restartScheduledMillis = millis() + 600;
+        showToastLCD("System", "Restarting...", 1000, UI_DASHBOARD);
+        return;
+      } else if (currentMainMenuIdx == 15) {
+        strcpy(infoLine1, "ESP Energy Log");
+        strcpy(infoLine2, "Firmware: v3.0");
+        snprintf(infoLine3, 23, "%s.local", settings.mdnsHostname);
+        strcpy(infoLine4, "By: M.Maity");
+        uiReturnState = UI_MAIN_MENU;
+        uiState = UI_INFO_VIEW;
+        return;
+      }
+
+      // Enter Submenu
+      switch (currentMainMenuIdx) {
+        case 1:
+          activeSubmenuPtr = wifiSetupSubmenu;
+          activeSubmenuLen = 5;
+          break;
+        case 2:
+          activeSubmenuPtr = mdnsSubmenu;
+          activeSubmenuLen = 4;
+          break;
+        case 3:
+          activeSubmenuPtr = nodeRedSubmenu;
+          activeSubmenuLen = 3;
+          break;
+        case 4:
+          activeSubmenuPtr = afpcSubmenu;
+          activeSubmenuLen = 4;
+          break;
+        case 5:
+          activeSubmenuPtr = startupSubmenu;
+          activeSubmenuLen = 2;
+          break;
+        case 6:
+          activeSubmenuPtr = updateIntervalSubmenu;
+          activeSubmenuLen = 6;
+          break;
+        case 7:
+          activeSubmenuPtr = thresholdSubmenu;
+          activeSubmenuLen = 10;
+          break;
+        case 8:
+          activeSubmenuPtr = safetyAlertSubmenu;
+          activeSubmenuLen = 7;
+          break;
+        case 9:
+          activeSubmenuPtr = safetyProtectionSubmenu;
+          activeSubmenuLen = 6;
+          break;
+        case 10:
+          activeSubmenuPtr = mainOutputSubmenu;
+          activeSubmenuLen = 3;
+          break;
+        case 12:
+          activeSubmenuPtr = clearDataSubmenu;
+          activeSubmenuLen = 3;
+          break;
+        case 13:
+          activeSubmenuPtr = factoryResetSubmenu;
+          activeSubmenuLen = 3;
+          break;
+      }
+      currentSubMenuIdx = 0;
+      setEncoderPos(0);
+      uiState = UI_SUB_MENU;
+      return;
+    }
+
+    // Draw Main Menu
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_t0_11_tr);
+    u8g2.setDrawColor(1);
+    u8g2.drawBox(0, 0, 128, 12);
+    u8g2.setDrawColor(0);
+    u8g2.drawStr(32, 10, "Menu Control");
+    u8g2.setDrawColor(1);
+
+    int start = max(0, min(currentMainMenuIdx - 1, mainMenuCount - 3));
+    for (int i = 0; i < 3 && (start + i) < mainMenuCount; i++) {
+      int idx = start + i;
+      int yBox = 14 + i * 16;
+      int yTxt = 25 + i * 16;
+      if (idx == currentMainMenuIdx) {
+        u8g2.drawBox(0, yBox, 128, 15);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(4, yTxt, mainMenu[idx]);
+        u8g2.setDrawColor(1);
+      } else {
+        u8g2.drawStr(4, yTxt, mainMenu[idx]);
+      }
+    }
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 6. Submenu Navigation
+  if (uiState == UI_SUB_MENU) {
+    long pos = getEncoderPos();
+    if (pos != lastEncoderPos) {
+      currentSubMenuIdx = constrain(currentSubMenuIdx + (pos > lastEncoderPos ? 1 : -1), 0, activeSubmenuLen - 1);
+      lastEncoderPos = pos;
+      lastMenuActivityMillis = now;
+      triggerBeep(20, 1, 0);
+    }
+
+    if (checkEncoderButtonClick()) {
+      triggerBeep(45, 1, 0);
+      if (currentSubMenuIdx == 0) {
+        setEncoderPos(currentMainMenuIdx);
+        uiState = UI_MAIN_MENU;
+      } else {
+        editCtx.onConfirm = nullptr;
+        handleSubmenuAction(currentMainMenuIdx, currentSubMenuIdx);
+      }
+      return;
+    }
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(0, 12, mainMenu[currentMainMenuIdx]);
+    u8g2.setFont(u8g2_font_6x12_tf);
+    drawSubmenuRightValue(currentMainMenuIdx, currentSubMenuIdx);
+    u8g2.drawLine(0, 15, 127, 15);
+
+    int start = (currentSubMenuIdx / 3) * 3;
+    for (int i = 0; i < 3 && (start + i) < activeSubmenuLen; i++) {
+      int itemIdx = start + i;
+      int yPos = 29 + i * 13;
+      if (itemIdx == currentSubMenuIdx) {
+        u8g2.drawStr(0, yPos, ">");
+      }
+      u8g2.drawStr(10, yPos, activeSubmenuPtr[itemIdx]);
+    }
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 7. Integer Value Editor
+  if (uiState == UI_EDIT_INT) {
+    long pos = getEncoderPos();
+    if (pos != lastEncoderPos) {
+      editCtx.intTemp = constrain(pos * editCtx.intStep, editCtx.intMin, editCtx.intMax);
+      setEncoderPos(editCtx.intTemp / editCtx.intStep);
+      lastMenuActivityMillis = now;
+      triggerBeep(15, 1, 0);
+    }
+    if (checkEncoderButtonClick()) {
+      *editCtx.intTarget = editCtx.intTemp;
+      if (editCtx.onConfirm) editCtx.onConfirm();
+      saveSettings();
+      triggerBeep(60, 1, 0);
+      showToastLCD(editCtx.title, "Saved!", 900, UI_SUB_MENU);
+      return;
+    }
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(0, 13, editCtx.title);
+    u8g2.setFont(u8g2_font_ncenB18_tr);
+    char vStr[16];
+    snprintf(vStr, sizeof(vStr), "%d %c", editCtx.intTemp, editCtx.unit);
+    u8g2.drawStr(20, 42, vStr);
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(0, 60, "Click knob to save");
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 8. Float Value Editor
+  if (uiState == UI_EDIT_FLOAT) {
+    long pos = getEncoderPos();
+    if (pos != lastEncoderPos) {
+      long minS = round(editCtx.floatMin * editCtx.floatScale);
+      long maxS = round(editCtx.floatMax * editCtx.floatScale);
+      long clamped = constrain(pos, minS, maxS);
+      editCtx.floatTemp = clamped / editCtx.floatScale;
+      setEncoderPos(clamped);
+      lastMenuActivityMillis = now;
+      triggerBeep(15, 1, 0);
+    }
+    if (checkEncoderButtonClick()) {
+      *editCtx.floatTarget = editCtx.floatTemp;
+      saveSettings();
+      triggerBeep(60, 1, 0);
+      showToastLCD(editCtx.title, "Saved!", 900, UI_SUB_MENU);
+      return;
+    }
+
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(0, 13, editCtx.title);
+    u8g2.setFont(u8g2_font_ncenB18_tr);
+    char vStr[16];
+    snprintf(vStr, sizeof(vStr), "%.2f %c", editCtx.floatTemp, editCtx.unit);
+    u8g2.drawStr(20, 42, vStr);
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(0, 60, "Click knob to save");
+    u8g2.sendBuffer();
+    return;
   }
 }
 
-// Enhanced reset with confirmation
-void resetDaysValues()
-{
-  kwhDays = 0.0;
-  preferences.putFloat("days", kwhDays);
-  // preferences.commit();  // ← Remove this line - not needed
+// ============================================================================
+// BOOT SEQUENCE HELPERS & SETUP
+// ============================================================================
+void bootConnectWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+  WiFi.begin();
 
-  Serial.println("Days value reset to 0 and saved to flash");
+  const int MAX_ATTEMPTS = 5;
+  for (int attempts = 0; attempts < MAX_ATTEMPTS; attempts++) {
+    char attemptStr[20];
+    snprintf(attemptStr, sizeof(attemptStr), "Attempt: %d/%d", attempts + 1, MAX_ATTEMPTS);
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x12_tf);
+    u8g2.drawStr(0, 12, "Connecting WiFi...");
+    u8g2.drawStr(0, 24, attemptStr);
+    u8g2.sendBuffer();
+
+    if (WiFi.status() == WL_CONNECTED) {
+      u8g2.clearBuffer();
+      u8g2.drawStr(0, 12, "WiFi Connected!");
+      u8g2.drawStr(0, 24, "SSID:");
+      u8g2.drawStr(0, 36, WiFi.SSID().c_str());
+      u8g2.drawStr(0, 48, "IP:");
+      u8g2.drawStr(0, 60, WiFi.localIP().toString().c_str());
+      u8g2.sendBuffer();
+      delay(2000);
+      return;
+    }
+    delay(2000);
+  }
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(0, 12, "No WiFi Found");
+  u8g2.drawStr(0, 24, "Will auto-connect");
+  u8g2.drawStr(0, 36, "when available");
+  u8g2.drawStr(0, 48, "or use menu");
+  u8g2.sendBuffer();
+  delay(2000);
 }
 
-// Add this function to force save on critical events (optional)
-void forceSaveTotalDays()
-{
-  preferences.putFloat("days", kwhDays);
-  // preferences.commit();  // ← Remove this line - not needed
-  Serial.printf("Days force-saved: %.2f\n", kwhDays);
-}
-
-void configDateTime()
-{
-  if (WiFi.status() != WL_CONNECTED)
-  {
+void bootSyncTime() {
+  if (WiFi.status() != WL_CONNECTED) {
     u8g2.clearBuffer();
     u8g2.setFont(u8g2_font_6x12_tf);
     u8g2.drawStr(0, 24, "No WiFi!");
     u8g2.drawStr(0, 36, "Time not synced!");
     u8g2.drawStr(0, 48, "Starting offline...");
     u8g2.sendBuffer();
-    // Yielding delay
-    unsigned long start = millis();
-    while (millis() - start < 2000)
-      yield();
-
-    // Set default time: 12:00, 01/01/2025
-    struct tm tm;
-    tm.tm_year = 2025 - 1900;
-    tm.tm_mon = 0;
-    tm.tm_mday = 1;
-    tm.tm_hour = 12;
-    tm.tm_min = 0;
-    tm.tm_sec = 0;
-    time_t t = mktime(&tm);
-    struct timeval now = {.tv_sec = t};
-    settimeofday(&now, nullptr);
+    delay(2000);
     return;
   }
 
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "Syncing Time...");
-  u8g2.sendBuffer();
-
-  // Yielding delay
-  unsigned long start = millis();
-  while (millis() - start < 1000)
-    yield();
-
-  int attempts = 0;
-  const int MAX_ATTEMPTS = 5;
   struct tm timeinfo;
-
-  while (attempts < MAX_ATTEMPTS)
-  {
-    char attemptStr[16];
-    snprintf(attemptStr, 16, "Attempt: %d/5", attempts + 1);
+  const int MAX_ATTEMPTS = 5;
+  for (int attempts = 0; attempts < MAX_ATTEMPTS; attempts++) {
+    char attemptStr[20];
+    snprintf(attemptStr, sizeof(attemptStr), "Attempt: %d/%d", attempts + 1, MAX_ATTEMPTS);
     u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x12_tf);
     u8g2.drawStr(0, 12, "Syncing Time...");
     u8g2.drawStr(0, 24, attemptStr);
     u8g2.sendBuffer();
 
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-    // Shorter yielding delay to avoid watchdog
-    start = millis();
-    while (millis() - start < 1000)
-      yield();
-    if (getLocalTime(&timeinfo))
-    {
+    configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov");
+    delay(1000);
+    if (getLocalTime(&timeinfo, 500) && (timeinfo.tm_year + 1900 >= 2024)) {
+      ntpSynced = true;
+      lastNtpSyncMillis = millis();
       break;
     }
-    attempts++;
   }
 
-  if (getLocalTime(&timeinfo))
-  {
-    char timeStr[16];
-    char dateStr[18];
-    char gmtStr[30];
+  if (ntpSynced) {
+    char timeStr[20], dateStr[20], gmtStr[30];
     strftime(timeStr, sizeof(timeStr), "Time: %H:%M:%S", &timeinfo);
     strftime(dateStr, sizeof(dateStr), "Date: %d.%m.%Y", &timeinfo);
     strftime(gmtStr, sizeof(gmtStr), "GMT: %z %Z", &timeinfo);
@@ -2147,2270 +2605,50 @@ void configDateTime()
     u8g2.drawStr(0, 32, dateStr);
     u8g2.drawStr(0, 62, gmtStr);
     u8g2.sendBuffer();
-    // Yielding delay
-    start = millis();
-    while (millis() - start < 2000)
-      yield();
-  }
-  else
-  {
-    // Apply default time if NTP fails
-    struct tm tm;
-    tm.tm_year = 2025 - 1900;
-    tm.tm_mon = 0;
-    tm.tm_mday = 1;
-    tm.tm_hour = 12;
-    tm.tm_min = 0;
-    tm.tm_sec = 0;
-    time_t t = mktime(&tm);
-    struct timeval now = {.tv_sec = t};
-    settimeofday(&now, nullptr);
-
+    delay(2000);
+  } else {
     u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x12_tf);
     u8g2.drawStr(0, 12, "Time not synced!");
     u8g2.drawStr(0, 24, "Check internet!");
     u8g2.drawStr(0, 48, "Starting offline...");
     u8g2.sendBuffer();
-    // Yielding delay
-    start = millis();
-    while (millis() - start < 2000)
-      yield();
-  }
-}
-
-void showAboutScreen()
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_7x14B_tr);
-  u8g2.drawStr(0, 12, "ESP Energy Log");
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 28, "Version: 2.0");
-  u8g2.drawStr(0, 40, "By: M.Maity");
-  u8g2.drawStr(0, 60, "Press to exit");
-  u8g2.sendBuffer();
-
-  while (!buttonPressed())
-  {
-    delay(100);
-  }
-  drawMenu(mainMenu, mainMenuCount, 15);
-}
-
-void stopFirebaseTask()
-{
-  if (firebaseTask != NULL)
-  {
-    vTaskDelete(firebaseTask);
-    firebaseTask = NULL;
-    Serial.println("Firebase task stopped");
-  }
-}
-
-void startFirebaseTask()
-{
-  if (firebaseTask == NULL && fbSettings.enabled && strlen(fbSettings.host) > 0)
-  {
-    xTaskCreatePinnedToCore(
-        firebaseTaskFunction,
-        "FirebaseTask",
-        8192,
-        NULL,
-        1,
-        &firebaseTask,
-        0);
-    Serial.println("Firebase task restarted");
-  }
-}
-
-int adjustThreshold(const char *title, int currentValue, int minValue, int maxValue, char unit = 'V', int step = 1)
-{
-  bool editing = true;
-  int tempValue = currentValue;
-  encoder.setPosition(tempValue / step); // Divide by step for encoder position
-  long lastPos = tempValue / step;
-
-  while (editing)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, title);
-
-    u8g2.setFont(u8g2_font_6x12_tf);
-    char valueStr[8];
-    encoder.tick();
-    long pos = encoder.getPosition();
-
-    if (pos != lastPos)
-    {
-      tempValue = constrain(pos * step, minValue, maxValue); // Multiply by step
-      lastPos = pos;
-      playBeep(25);
-    }
-
-    snprintf(valueStr, 8, "%d%c", tempValue, unit);
-    u8g2.drawStr(45, 35, valueStr);
-    u8g2.drawStr(0, 55, "Click to save");
-    u8g2.sendBuffer();
-
-    if (buttonPressed())
-    {
-      if (showSaveConfirmDialog())
-      {
-        showMessage("Saved!");
-      }
-      else
-      {
-        showMessage("Cancelled!");
-        tempValue = currentValue;
-      }
-      editing = false;
-    }
-  }
-  return tempValue;
-}
-float adjustFrequency(const char *title, float currentValue, float minValue, float maxValue)
-{
-  bool editing = true;
-  float tempValue = currentValue;
-  int scaledValue = tempValue * 100; // Convert to integer (e.g. 50.00 -> 5000)
-  encoder.setPosition(scaledValue);
-  long lastPos = scaledValue;
-
-  while (editing)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, title);
-
-    u8g2.setFont(u8g2_font_6x12_tf);
-    char valueStr[8];
-    encoder.tick();
-    long pos = encoder.getPosition();
-
-    if (pos != lastPos)
-    {
-      scaledValue = constrain(pos, minValue * 100, maxValue * 100);
-      tempValue = scaledValue / 100.0; // Convert back to float
-      lastPos = pos;
-      playBeep(25);
-    }
-
-    snprintf(valueStr, 8, "%.2fHz", tempValue);
-    u8g2.drawStr(45, 35, valueStr);
-    u8g2.drawStr(0, 55, "Click to save");
-    u8g2.sendBuffer();
-
-    if (buttonPressed())
-    {
-      if (showSaveConfirmDialog())
-      {
-        showMessage("Saved!");
-        editing = false; // Add this line
-        return tempValue;
-      }
-      else
-      {
-        showMessage("Cancelled!");
-        editing = false; // Add this line
-        return currentValue;
-      }
-    }
-  }
-  return currentValue;
-}
-
-float adjustMfdPerChannel()
-{
-  bool editing = true;
-  float tempMfd = settings.mfdPerChannel;
-  int scaledValue = tempMfd * 10; // Convert to integer (e.g., 4.0 -> 40)
-  encoder.setPosition(scaledValue);
-  long lastPos = scaledValue;
-
-  while (editing)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, "MFD Per Chan");
-
-    u8g2.setFont(u8g2_font_6x12_tf);
-    char valueStr[8];
-    encoder.tick();
-    long pos = encoder.getPosition();
-
-    if (pos != lastPos)
-    {
-      scaledValue = constrain(pos, 1, 150); // 0.1 to 15.0
-      tempMfd = scaledValue / 10.0;         // Convert back to float
-      lastPos = pos;
-      playBeep(25);
-    }
-
-    snprintf(valueStr, 8, "%.1f", tempMfd);
-    u8g2.drawStr(45, 35, valueStr);
-    u8g2.drawStr(0, 55, "Click to save");
-    u8g2.sendBuffer();
-
-    if (buttonPressed())
-    {
-      if (showSaveConfirmDialog())
-      {
-        showMessage("Saved!");
-        return tempMfd;
-      }
-      else
-      {
-        showMessage("Cancelled!");
-        return settings.mfdPerChannel;
-      }
-    }
-  }
-  return settings.mfdPerChannel;
-}
-
-void adjustTargetPF()
-{
-  bool editing = true;
-  float tempPF = settings.targetFactor;
-  encoder.setPosition(tempPF * 100); // Scale up for integer steps
-
-  while (editing)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, "Target PF");
-
-    u8g2.setFont(u8g2_font_6x12_tf);
-    char pf[6];
-    long pos = encoder.getPosition();
-    pos = constrain(pos, 50, 99); // Limit between 0.50 and 0.99
-    tempPF = pos / 100.0;
-    snprintf(pf, 6, "%.2f", tempPF);
-
-    u8g2.drawStr(45, 35, pf);
-    u8g2.drawStr(0, 55, "Click to Save!");
-    u8g2.sendBuffer();
-
-    encoder.tick();
-    if (pos != lastEncoderPos)
-    {
-      lastEncoderPos = pos;
-      playBeep(25);
-    }
-
-    if (buttonPressed())
-    {
-      // Show confirmation dialog
-      if (showSaveConfirmDialog())
-      {
-        settings.targetFactor = tempPF;
-        saveSettings();
-
-        showMessage("PF Saved!");
-      }
-      else
-      {
-        showMessage("Cancelled!");
-      }
-      editing = false;
-    }
-  }
-}
-
-// 5. Alert & Protection Functions
-void showAlertResult(const char *alertName, bool enabled)
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 24, alertName);
-  u8g2.drawStr(0, 36, enabled ? "Alert Enabled" : "Alert Disabled");
-  u8g2.sendBuffer();
-  delay(1000);
-}
-void showProtectionResult(const char *protectionName, bool enabled)
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 24, protectionName);
-  u8g2.drawStr(0, 36, enabled ? "Protection ON" : "Protection OFF");
-  u8g2.sendBuffer();
-  delay(1000);
-}
-
-// New helper function to draw values for selected items
-void drawSubmenuValue(int mainIndex, int subIndex)
-{
-  char val[16];
-
-  switch (mainIndex)
-  {
-  case 1: // WiFi Setup
-    if (subIndex == 2)
-      u8g2.drawStr(85, 12, WiFi.status() == WL_CONNECTED ? "conn" : "---");
-    break;
-
-  case 2: // Node-Red
-    if (subIndex == 1)
-    {
-      u8g2.drawStr(110, 12, settings.nodeRedEnabled ? "ON" : "OFF");
-    }
-    else if (subIndex == 3)
-    {
-      char *port = strchr(settings.nodeRedIP, ':');
-      if (port)
-        u8g2.drawStr(85, 12, port + 1);
-    }
-    else if (subIndex == 4)
-    {
-      u8g2.drawStr(85, 12, settings.nodeRedEnabled ? (nodeRedConnected ? "conn" : "---") : "OFF");
-    }
-    break;
-
-  case 3: // Cloud Share
-    if (subIndex == 1)
-    {
-      u8g2.drawStr(110, 12, fbSettings.enabled ? "ON" : "OFF");
-    }
-    else if (subIndex == 3)
-    {
-      snprintf(val, 8, "%ds", fbSettings.dataInterval);
-      u8g2.drawStr(100, 12, val);
-    }
-    else if (subIndex == 6)
-    {
-      if (fbSettings.enabled && strlen(fbSettings.host) > 0)
-      {
-        u8g2.drawStr(100, 12, firebaseConnected ? " " : " ");
-      }
-      else
-      {
-        u8g2.drawStr(100, 12, "---");
-      }
-    }
-    break;
-
-  case 4: // AFPC
-    if (subIndex == 1)
-    {
-      u8g2.drawStr(110, 12, settings.afpcEnabled ? "ON" : "OFF");
-    }
-    else if (subIndex == 2)
-    {
-      snprintf(val, 6, "%.2f", settings.targetFactor);
-      u8g2.drawStr(85, 12, val);
-    }
-    else if (subIndex == 3)
-    {
-      snprintf(val, 6, "%.1f", settings.mfdPerChannel);
-      u8g2.drawStr(85, 12, val);
-    }
-    break;
-
-  case 5: // Startup
-    if (subIndex == 1)
-    {
-      snprintf(val, 6, "%ds", settings.startupTime);
-      u8g2.drawStr(85, 12, val);
-    }
-    break;
-
-  case 6: // Update Interval
-  {
-    int *intervals[] = {nullptr, &settings.espShareInterval, &settings.nodeRedInterval,
-                        &settings.pzemInterval, &settings.alertInterval, &settings.protectionDelay};
-    if (subIndex >= 1 && subIndex <= 5)
-    {
-      snprintf(val, 8, "%ds", *intervals[subIndex]);
-      u8g2.drawStr(85, 12, val);
-    }
-  }
-  break;
-
-  case 7: // Thresholds
-    if (subIndex == 1)
-      snprintf(val, 6, "%dV", (int)settings.voltHigh);
-    else if (subIndex == 2)
-      snprintf(val, 6, "%dV", (int)settings.voltLow);
-    else if (subIndex == 3)
-      snprintf(val, 6, "%dW", (int)settings.powerHigh);
-    else if (subIndex == 4)
-      snprintf(val, 6, "%dW", (int)settings.powerLow);
-    else if (subIndex == 5)
-      snprintf(val, 7, "%.2fHz", settings.freqHigh);
-    else if (subIndex == 6)
-      snprintf(val, 7, "%.2fHz", settings.freqLow);
-    else if (subIndex == 7)
-      snprintf(val, 8, "%dkWh", settings.maxkWh);
-    else if (subIndex == 8)
-      snprintf(val, 8, "%dW", settings.afpcLowWatt);
-    else if (subIndex == 9)
-      snprintf(val, 8, "%dW", settings.afpcHighWatt);
-    else
-      return;
-    u8g2.drawStr(85, 12, val);
-    break;
-
-  case 8: // Safety Alert
-  {
-    bool *alerts[] = {nullptr, &settings.highVoltageAlert, &settings.lowVoltageAlert,
-                      &settings.highPowerAlert, &settings.lowPowerAlert,
-                      &settings.lowFreqAlert, &settings.highFreqAlert};
-    if (subIndex >= 1 && subIndex <= 6)
-    {
-      u8g2.drawStr(110, 12, *alerts[subIndex] ? "ON" : "OFF");
-    }
-  }
-  break;
-
-  case 9: // Safety Protection
-  {
-    bool *protections[] = {nullptr, &settings.highVProtec, &settings.LowVProtec,
-                           &settings.highPProtec, &settings.highHzProtec, &settings.lowHzProtec};
-    if (subIndex >= 1 && subIndex <= 5)
-    {
-      u8g2.drawStr(110, 12, *protections[subIndex] ? "ON" : "OFF");
-    }
-  }
-  break;
-
-  case 10: // Main Output
-    if (subIndex == 1)
-    {
-      u8g2.drawStr(110, 12, settings.mainOutput ? "ON" : "OFF");
-    }
-    else if (subIndex == 2)
-    {
-      u8g2.drawStr(110, 12, settings.kWhSaver ? "ON" : "OFF");
-    }
-    break;
-
-  case 12: // Clear Data
-    if (subIndex == 1)
-    {
-      snprintf(val, 8, "%dkWh", (int)readings.energy);
-      u8g2.drawStr(85, 12, val);
-    }
-    else if (subIndex == 2)
-    {
-      snprintf(val, 6, "%dd", (int)readings.totalDays);
-      u8g2.drawStr(85, 12, val);
-    }
-    break;
-  }
-}
-
-// New helper function to draw submenu with values
-void drawSubmenu(int mainIndex, const char **items, int len, int selected)
-{
-  u8g2.clearBuffer();
-
-  // Header
-  u8g2.setFont(u8g2_font_7x14B_tr);
-  u8g2.drawStr(0, 12, mainMenu[mainIndex]);
-
-  // Draw items (3 visible)
-  u8g2.setFont(u8g2_font_6x12_tf);
-  int start = (selected / 3) * 3;
-  for (int i = 0; i < 3 && (start + i) < len; i++)
-  {
-    int itemIndex = start + i;
-    int yPos = 28 + i * 12;
-
-    if (itemIndex == selected)
-    {
-      u8g2.drawStr(0, yPos, ">");
-      drawSubmenuValue(mainIndex, itemIndex); // Show value for selected item
-    }
-    u8g2.drawStr(10, yPos, items[itemIndex]);
-  }
-  u8g2.sendBuffer();
-}
-
-// 6. WiFi & Communication Functions
-void connectWiFi()
-{
-  WiFiManager wm;
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-
-  // Show initial message
-  u8g2.drawStr(0, 12, "AP: ESP.EnergyLog");
-  u8g2.drawStr(0, 24, "IP: 192.168.4.1");
-  u8g2.drawStr(0, 48, "Timeout: 60s");
-  u8g2.sendBuffer();
-
-  wm.setConfigPortalTimeout(60);
-  bool success = wm.autoConnect("ESP.EnergyLog");
-
-  if (success)
-  {
-    u8g2.clearBuffer();
-    u8g2.drawStr(0, 12, "Connected!");
-    u8g2.drawStr(0, 24, "IP:");
-    u8g2.drawStr(0, 36, WiFi.localIP().toString().c_str());
-    u8g2.sendBuffer();
-    delay(3000);
-  }
-  else
-  {
-    u8g2.clearBuffer();
-    u8g2.drawStr(0, 24, "Connection Failed");
-    u8g2.sendBuffer();
     delay(2000);
   }
 }
-void checkAndConnectWiFi()
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
 
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    // Already connected, show status
-    u8g2.drawStr(0, 12, "Connected to:");
-    u8g2.drawStr(0, 24, WiFi.SSID().c_str());
-    u8g2.drawStr(0, 36, "IP:");
-    u8g2.drawStr(0, 48, WiFi.localIP().toString().c_str());
-    u8g2.sendBuffer();
-    delay(3000);
-  }
-  else
-  {
-    // Try to reconnect
-    u8g2.drawStr(0, 12, "Reconnecting to");
-    u8g2.drawStr(0, 24, "saved network...");
-    u8g2.sendBuffer();
-
-    // Try to reconnect for 10 seconds
-    WiFi.begin();
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 10)
-    {
-      delay(1000);
-      attempts++;
-      // Update progress
-      u8g2.drawStr(0, 48, "Wait...");
-      u8g2.drawStr(50, 48, String(10 - attempts).c_str());
-      u8g2.drawStr(62, 48, "s");
-      u8g2.sendBuffer();
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-      u8g2.clearBuffer();
-      u8g2.drawStr(0, 12, "Connected!");
-      u8g2.drawStr(0, 24, "SSID:");
-      u8g2.drawStr(0, 36, WiFi.SSID().c_str());
-      u8g2.drawStr(0, 48, "IP:");
-      u8g2.drawStr(0, 60, WiFi.localIP().toString().c_str());
-    }
-    else
-    {
-      u8g2.clearBuffer();
-      u8g2.drawStr(0, 24, "Connection Failed!");
-      u8g2.drawStr(0, 36, "Goto Connect WiFi");
-    }
-    u8g2.sendBuffer();
-    delay(3000);
-  }
-}
-
-// WiFi Menu Handler
-void handleWiFiSubmenu(int subIndex)
-{
-  switch (subIndex)
-  {
-  case 1: // Connect WiFi
-    connectWiFi();
-    break;
-
-  case 2: // WiFi Status
-    checkAndConnectWiFi();
-    break;
-
-  case 3: // Disconnect
-    WiFi.disconnect();
-    showMessage("WiFi Disconnected!");
-    break;
-
-  case 4:
-  { // Forget WiFi
-    bool confirmed = false;
-    showConfirmDialog("Forgot WiFi?", confirmed);
-    if (confirmed)
-    {
-      WiFiManager wm;
-      wm.resetSettings();
-      showMessage("WiFi Reset Done!");
-      ESP.restart();
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-  }
-  }
-}
-
-// Node-Red Menu Handler
-void handleNodeRedSubmenu(int subIndex)
-{
-  switch (subIndex)
-  {
-  case 1: // Enable/Disable
-    showConfirmDialog("Enable Node-Red?", settings.nodeRedEnabled);
-    saveSettings();
-    showMessage(settings.nodeRedEnabled ? "Node-Red ON" : "Node-Red OFF");
-    break;
-
-  case 2: // IP Address
-    editNodeRedIP();
-    break;
-
-  case 3:
-  { // Port
-    char *portStr = strchr(settings.nodeRedIP, ':');
-    int currentPort = portStr ? atoi(portStr + 1) : 1880;
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 24, "Current Port:");
-    char portDisplay[6];
-    snprintf(portDisplay, 6, "%d", currentPort);
-    u8g2.drawStr(0, 36, portDisplay);
-    u8g2.drawStr(0, 55, "Hold to edit >");
-    u8g2.sendBuffer();
-    delay(3000);
-
-    if (buttonPressed())
-    {
-      int newPort = adjustThreshold("Edit Port", currentPort, 1, 9999, ' ');
-      if (showSaveConfirmDialog())
-      {
-        if (portStr)
-          snprintf(portStr + 1, 6, "%d", newPort);
-        saveSettings();
-        showMessage("Port Saved!");
-      }
-      else
-      {
-        showMessage("Cancelled!");
-      }
-    }
-    break;
-  }
-
-  case 4: // Status
-    if (!settings.nodeRedEnabled)
-      break;
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Node-RED Status");
-    u8g2.drawStr(0, 24, settings.nodeRedIP);
-    u8g2.drawStr(0, 36, nodeRedConnected ? "Connected!" : "Disconnected!");
-    u8g2.drawStr(0, 48, lastNodeRedResponse.c_str());
-    u8g2.drawStr(0, 60, "Click to exit");
-    u8g2.sendBuffer();
-
-    while (!buttonPressed())
-      delay(100);
-    break;
-  }
-}
-
-// Cloud Share Menu Handler (Placeholder)
-void handleCloudShareSubmenu(int subIndex)
-{
-  bool confirmed = false;
-
-  switch (subIndex)
-  {
-  case 1: // Enable/Disable
-  {
-    showConfirmDialog("Enable Firebase?", confirmed);
-    fbSettings.enabled = confirmed;
-    saveFirebaseSettings();
-
-    if (fbSettings.enabled)
-    {
-      startFirebaseTask(); // Start task
-    }
-    else
-    {
-      stopFirebaseTask(); // Stop task
-    }
-
-    showMessage(fbSettings.enabled ? "Firebase ON" : "Firebase OFF");
-  }
-  break;
-
-  case 2: // Credentials Setup
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      showMessage("WiFi Required!");
-      break;
-    }
-    stopFirebaseTask(); // Stop during config
-    startFirebaseConfigPortal();
-    if (fbSettings.enabled)
-      startFirebaseTask(); // Restart if enabled
-    break;
-
-  case 3: // Data Share Interval
-  {
-    stopFirebaseTask(); // Stop to change interval
-    int intervalSeconds = fbSettings.dataInterval;
-    intervalSeconds = adjustThreshold("Upload Interval", intervalSeconds, 10, 300, 's', 1);
-    fbSettings.dataInterval = intervalSeconds;
-    saveFirebaseSettings();
-    if (fbSettings.enabled)
-      startFirebaseTask(); // Restart with new interval
-  }
-  break;
-
-  case 4: // Test Connection
-  {
-    if (strlen(fbSettings.host) == 0)
-    {
-      showMessage("Setup credentials!");
-      break;
-    }
-
-    if (WiFi.status() != WL_CONNECTED)
-    {
-      showMessage("WiFi Required!");
-      break;
-    }
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Testing...");
-    u8g2.drawStr(0, 24, "Uploading data");
-    u8g2.sendBuffer();
-    delay(500);
-
-    bool testSuccess = testFirebaseConnection();
-
-    u8g2.clearBuffer();
-    if (testSuccess)
-    {
-      u8g2.drawStr(0, 20, "Test Successful!");
-      u8g2.drawStr(0, 32, "Data uploaded");
-      u8g2.drawStr(0, 44, lastFirebaseResponse.c_str());
-    }
-    else
-    {
-      u8g2.drawStr(0, 20, "Test Failed!");
-      u8g2.drawStr(0, 32, lastFirebaseResponse.c_str());
-    }
-    u8g2.drawStr(0, 60, "Click to exit");
-    u8g2.sendBuffer();
-
-    while (!buttonPressed())
-      delay(100);
-  }
-  break;
-
-  case 5: // Forget Credentials
-    showConfirmDialog("Delete credentials?", confirmed);
-    if (confirmed)
-    {
-      stopFirebaseTask(); // Stop task
-      strcpy(fbSettings.host, "");
-      strcpy(fbSettings.auth, "");
-      fbSettings.enabled = false;
-      saveFirebaseSettings();
-      showMessage("Credentials Deleted!");
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-
-  case 6: // Status
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Firebase Status");
-
-    if (!fbSettings.enabled)
-    {
-      u8g2.drawStr(0, 28, "Status: Disabled");
-    }
-    else if (strlen(fbSettings.host) == 0)
-    {
-      u8g2.drawStr(0, 28, "No credentials");
-      u8g2.drawStr(0, 40, "Setup first!");
-    }
-    else
-    {
-      char urlShort[22];
-      strncpy(urlShort, fbSettings.host, 21);
-      urlShort[21] = '\0';
-      u8g2.drawStr(0, 24, urlShort);
-
-      if (lastFirebaseResponse.length() > 0)
-      {
-        u8g2.drawStr(0, 36, lastFirebaseResponse.c_str());
-      }
-      else
-      {
-        u8g2.drawStr(0, 36, "Waiting for data...");
-      }
-
-      char intervalStr[20];
-      snprintf(intervalStr, 20, "Interval: %ds", fbSettings.dataInterval);
-      u8g2.drawStr(0, 48, intervalStr);
-    }
-
-    u8g2.drawStr(0, 60, "Click to exit");
-    u8g2.sendBuffer();
-
-    while (!buttonPressed())
-      delay(100);
-    break;
-  }
-}
-
-// AFPC Menu Handler
-void handleAFPCSubmenu(int subIndex)
-{
-  switch (subIndex)
-  {
-  case 1: // Enable/Disable
-    showConfirmDialog("Enable AFPC?", settings.afpcEnabled);
-    saveSettings();
-    showMessage(settings.afpcEnabled ? "AFPC Enabled" : "AFPC Disabled");
-    break;
-
-  case 2: // Target PF
-    adjustTargetPF();
-    break;
-
-  case 3: // MFD Per Channel
-    settings.mfdPerChannel = adjustMfdPerChannel();
-    saveSettings();
-    break;
-  }
-}
-
-// Update Interval Menu Handler
-void handleIntervalSubmenu(int subIndex)
-{
-  const char *titles[] = {"", "ESP Share", "Node-Red", "PZEM Update", "Alert Check", "Protection Delay"};
-  int *intervals[] = {nullptr, &settings.espShareInterval, &settings.nodeRedInterval,
-                      &settings.pzemInterval, &settings.alertInterval, &settings.protectionDelay};
-  int maxVals[] = {0, 300, 300, 60, 600, 3600};
-  int steps[] = {0, 1, 1, 1, 5, 60};
-
-  if (subIndex >= 1 && subIndex <= 5)
-  {
-    *intervals[subIndex] = adjustThreshold(titles[subIndex], *intervals[subIndex],
-                                           subIndex == 5 ? 60 : (subIndex == 4 ? 15 : (subIndex == 3 ? 1 : (subIndex == 2 ? 5 : 1))),
-                                           maxVals[subIndex], 's', steps[subIndex]);
-    saveSettings();
-    if (subIndex == 5)
-      PROTECTION_DELAY = settings.protectionDelay * 1000UL;
-  }
-}
-
-// Threshold Menu Handler
-void handleThresholdSubmenu(int subIndex)
-{
-  switch (subIndex)
-  {
-  case 1:
-    settings.voltHigh = adjustThreshold("High Voltage", (int)settings.voltHigh, 150, 280);
-    break;
-  case 2:
-    settings.voltLow = adjustThreshold("Low Voltage", (int)settings.voltLow, 120, 250);
-    break;
-  case 3:
-    settings.powerHigh = adjustThreshold("High Power", (int)settings.powerHigh, 100, 9900, 'W', 100);
-    break;
-  case 4:
-    settings.powerLow = adjustThreshold("Low Power", (int)settings.powerLow, 100, 9900, 'W', 100);
-    break;
-  case 5:
-    settings.freqHigh = adjustFrequency("High Freq.", settings.freqHigh, 49.0, 51.0);
-    break;
-  case 6:
-    settings.freqLow = adjustFrequency("Low Freq.", settings.freqLow, 49.0, 51.0);
-    break;
-  case 7:
-    settings.maxkWh = adjustThreshold("Max kWh", settings.maxkWh, 1, 9000, 'U', 5);
-    break;
-  case 8:
-    settings.afpcLowWatt = adjustThreshold("AFPC Low Watt", settings.afpcLowWatt, 1, 9900, 'W', 1);
-    break;
-  case 9:
-    settings.afpcHighWatt = adjustThreshold("AFPC High Watt", settings.afpcHighWatt, 100, 9900, 'W', 50);
-    break;
-  }
-  if (subIndex >= 1 && subIndex <= 9)
-    saveSettings();
-}
-
-// Safety Alert Menu Handler
-void handleSafetyAlertSubmenu(int subIndex)
-{
-  bool *alerts[] = {nullptr, &settings.highVoltageAlert, &settings.lowVoltageAlert,
-                    &settings.highPowerAlert, &settings.lowPowerAlert,
-                    &settings.lowFreqAlert, &settings.highFreqAlert};
-  const char *names[] = {"", "High Voltage", "Low Voltage", "High Power",
-                         "Low Power", "Under Freq", "Over Freq"};
-
-  if (subIndex >= 1 && subIndex <= 6)
-  {
-    showConfirmDialog("Enable Alert?", *alerts[subIndex]);
-    saveSettings();
-    showAlertResult(names[subIndex], *alerts[subIndex]);
-  }
-}
-
-// Safety Protection Menu Handler
-void handleSafetyProtectionSubmenu(int subIndex)
-{
-  bool *protections[] = {nullptr, &settings.highVProtec, &settings.LowVProtec,
-                         &settings.highPProtec, &settings.highHzProtec, &settings.lowHzProtec};
-  const char *names[] = {"", "High Voltage", "Low Voltage", "High Power",
-                         "High Freq", "Low Freq"};
-
-  if (subIndex >= 1 && subIndex <= 5)
-  {
-    showConfirmDialog("Enable Protec?", *protections[subIndex]);
-    saveSettings();
-    showProtectionResult(names[subIndex], *protections[subIndex]);
-  }
-}
-
-// Main Output Menu Handler
-void handleMainOutputSubmenu(int subIndex)
-{
-  switch (subIndex)
-  {
-  case 1: // Enable/Disable
-  {
-    bool previousState = settings.mainOutput;
-    showConfirmDialog("Enable Output?", settings.mainOutput);
-    saveSettings();
-
-    // ✅ Control relay immediately
-    digitalWrite(MAIN_RELAY, settings.mainOutput ? LOW : HIGH);
-
-    // ✅ Reset protection states when manually enabling
-    if (settings.mainOutput)
-    {
-      protectionWasActive = false;
-      shouldTurnOff = false;
-    }
-
-    // Push to Firebase only on change, only if enabled
-    if (fbSettings.enabled && WiFi.status() == WL_CONNECTED && settings.mainOutput != previousState)
-    {
-      writeOutputToFirebase(settings.mainOutput);
-    }
-
-    showMessage(settings.mainOutput ? "Output Enabled" : "Output Disabled");
-  }
-  break;
-
-  case 2: // kWh Saver
-    showConfirmDialog("Enable kWh Saver?", settings.kWhSaver);
-    saveSettings();
-    showMessage(settings.kWhSaver ? "kWh Saver ON" : "kWh Saver OFF");
-    break;
-  }
-}
-
-// Clear Data Menu Handler
-void handleClearDataSubmenu(int subIndex)
-{
-  bool confirmed = false;
-
-  switch (subIndex)
-  {
-  case 1: // Clear kWh
-    showConfirmDialog("Clear kWh?", confirmed);
-    if (confirmed)
-    {
-      resetKwhRequested = true;
-      showMessage("Energy Reset!");
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-
-  case 2: // Clear Days
-    showConfirmDialog("Clear Days?", confirmed);
-    if (confirmed)
-    {
-      resetDaysRequested = true;
-      showMessage("Days Reset!");
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-  }
-}
-
-// Helper function to reset data to defaults
-void resetDataDefaults()
-{
-  settings.startupTime = 60;
-  delay(10);
-  settings.mfdPerChannel = 4.0;
-  delay(10);
-  settings.maxkWh = 1;
-  delay(10);
-  settings.targetFactor = 0.9;
-  delay(10);
-  settings.voltHigh = 245;
-  delay(10);
-  settings.voltLow = 120;
-  delay(10);
-  settings.powerHigh = 5000;
-  delay(10);
-  settings.powerLow = 100;
-  delay(10);
-  settings.freqHigh = 51;
-  delay(10);
-  settings.freqLow = 49;
-  delay(10);
-  settings.afpcLowWatt = 100;
-  delay(10);
-  settings.afpcHighWatt = 1000;
-  delay(10);
-  settings.espShareInterval = 2;
-  delay(10);
-  settings.nodeRedInterval = 30;
-  delay(10);
-  settings.pzemInterval = 1;
-  delay(10);
-  settings.alertInterval = 180;
-  delay(10);
-  saveSettings();
-  delay(100);
-  showMessage("Data Reset Done!");
-  delay(1000);
-}
-
-// Helper function to reset settings to defaults
-void resetSettingsDefaults()
-{
-  settings.nodeRedEnabled = false;
-  delay(10);
-  settings.buzzerEnabled = true;
-  delay(10);
-  settings.highVoltageAlert = false;
-  delay(10);
-  settings.lowVoltageAlert = false;
-  delay(10);
-  settings.highPowerAlert = false;
-  delay(10);
-  settings.lowPowerAlert = false;
-  delay(10);
-  settings.highFreqAlert = false;
-  delay(10);
-  settings.lowFreqAlert = false;
-  delay(10);
-  settings.afpcEnabled = false;
-  delay(10);
-  settings.mainOutput = true;
-  delay(10);
-  settings.kWhSaver = false;
-  delay(10);
-  settings.highVProtec = false;
-  delay(10);
-  settings.LowVProtec = false;
-  delay(10);
-  settings.highPProtec = false;
-  delay(10);
-  settings.highHzProtec = false;
-  delay(10);
-  settings.lowHzProtec = false;
-  delay(10);
-  strcpy(settings.nodeRedIP, "192.168.0.1");
-  settings.nodeRedPort = 1880;
-  delay(50);
-
-  WiFiManager wm;
-  wm.resetSettings();
-  delay(100);
-
-  resetFirebaseSettings();
-  delay(100);
-
-  saveSettings();
-  delay(100);
-  showMessage("Settings Reset!");
-  delay(1000);
-}
-
-// Factory Reset Menu Handler
-void handleFactoryResetSubmenu(int subIndex)
-{
-  bool confirmed = false;
-
-  switch (subIndex)
-  {
-  case 1: // Reset Data
-    showConfirmDialog("Are you sure?", confirmed);
-    if (confirmed)
-    {
-      showMessage("Resetting Data...");
-      resetDataDefaults();
-      showMessage("Restarting...");
-      delay(500);
-      ESP.restart();
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-
-  case 2: // Reset Settings
-    showConfirmDialog("Are you sure?", confirmed);
-    if (confirmed)
-    {
-      showMessage("Resetting Settings...");
-      resetSettingsDefaults();
-      showMessage("Restarting...");
-      delay(500);
-      ESP.restart();
-    }
-    else
-    {
-      showMessage("Cancelled!");
-    }
-    break;
-  }
-}
-
-void handleSubmenuSelection(int mainIndex, int subIndex)
-{
-  bool confirmed = false;
-
-  switch (mainIndex)
-  {
-  case 1: // WiFi Setup
-    handleWiFiSubmenu(subIndex);
-    break;
-
-  case 2: // Node-Red
-    handleNodeRedSubmenu(subIndex);
-    break;
-
-  case 3: // Cloud Share
-    handleCloudShareSubmenu(subIndex);
-    break;
-
-  case 4: // AFPC
-    handleAFPCSubmenu(subIndex);
-    break;
-
-  case 5: // Startup
-    if (subIndex == 1)
-    {
-      settings.startupTime = adjustThreshold("Startup Delay", settings.startupTime, 1, 600, 's', 5);
-      saveSettings();
-    }
-    break;
-
-  case 6: // Update Interval
-    handleIntervalSubmenu(subIndex);
-    break;
-
-  case 7: // Thresholds
-    handleThresholdSubmenu(subIndex);
-    break;
-
-  case 8: // Safety Alert
-    handleSafetyAlertSubmenu(subIndex);
-    break;
-
-  case 9: // Safety Protection
-    handleSafetyProtectionSubmenu(subIndex);
-    break;
-
-  case 10: // Main Output
-    handleMainOutputSubmenu(subIndex);
-    break;
-
-  case 12: // Clear Data
-    handleClearDataSubmenu(subIndex);
-    break;
-
-  case 13: // Factory Reset
-    handleFactoryResetSubmenu(subIndex);
-    break;
-  }
-}
-
-// 7. Menu Processing Functions
-void processSelection(int index)
-{
-  // Handle Back option
-  if (index == 0)
-  {
-    menuActive = false;
-    displayLayout();
-    displayUnits();
-    displayStatusbar();
-    return;
-  }
-
-  // Handle direct actions (no submenu)
-  switch (index)
-  {
-  case 11: // Update Time
-    configDateTime();
-    drawMenu(mainMenu, mainMenuCount, index);
-    return;
-
-  case 14: // Restart
-  {
-    bool confirmed = false;
-    showConfirmDialog("Are you sure?", confirmed);
-    if (confirmed)
-    {
-      showMessage("Saving data...");
-      forceSaveTotalDays(); // ← Add this
-      delay(500);
-      showMessage("Restarting...");
-      ESP.restart();
-    }
-  }
-  break;
-
-  case 15: // About
-    showAboutScreen();
-    return;
-  }
-
-  // Get submenu details
-  const char **submenu = nullptr;
-  int submenuLength = 0;
-
-  switch (index)
-  {
-  case 1:
-    submenu = wifiSetupSubmenu;
-    submenuLength = 5;
-    break;
-  case 2:
-    submenu = nodeRedSubmenu;
-    submenuLength = 5;
-    break;
-  case 3:
-    submenu = firebaseSubmenu;
-    submenuLength = 7;
-    break;
-  case 4:
-    submenu = afpcSubmenu;
-    submenuLength = 4;
-    break;
-  case 5:
-    submenu = startupSubmenu;
-    submenuLength = 2;
-    break;
-  case 6:
-    submenu = updateIntervalSubmenu;
-    submenuLength = 6;
-    break;
-  case 7:
-    submenu = thresholdSubmenu;
-    submenuLength = 10;
-    break;
-  case 8:
-    submenu = safetyAlertSubmenu;
-    submenuLength = 7;
-    break;
-  case 9:
-    submenu = safetyProtectionSubmenu;
-    submenuLength = 6;
-    break;
-  case 10:
-    submenu = mainOutputSubmenu;
-    submenuLength = 3;
-    break;
-  case 12:
-    submenu = clearDataSubmenu;
-    submenuLength = 3;
-    break;
-  case 13:
-    submenu = factoryResetSubmenu;
-    submenuLength = 3;
-    break;
-  default:
-    return;
-  }
-
-  // Submenu navigation
-  int subIndex = 0;
-  bool inSubmenu = true;
-  encoder.setPosition(0);
-
-  while (inSubmenu)
-  {
-    drawSubmenu(index, submenu, submenuLength, subIndex);
-
-    // Handle encoder rotation
-    encoder.tick();
-    long pos = encoder.getPosition();
-    if (pos != lastEncoderPos)
-    {
-      subIndex = constrain(subIndex + (pos > lastEncoderPos ? 1 : -1), 0, submenuLength - 1);
-      lastEncoderPos = pos;
-      playBeep(25);
-    }
-
-    // Handle button press
-    if (buttonPressed())
-    {
-      playBeep(50);
-      if (subIndex == 0)
-      { // Back
-        inSubmenu = false;
-        encoder.setPosition(index);
-        drawMenu(mainMenu, mainMenuCount, index);
-      }
-      else
-      {
-        handleSubmenuSelection(index, subIndex);
-      }
-    }
-    vTaskDelay(1);
-  }
-}
-
-void handleMenuControl()
-{
-  portENTER_CRITICAL(&encoderMux);
-  long pos = encoderValue;
-  portEXIT_CRITICAL(&encoderMux);
-
-  // Handle encoder rotation
-  if (pos != lastEncoderPos)
-  {
-    if (pos > lastEncoderPos)
-    {
-      menuIndex[0] = constrain(menuIndex[0] + 1, 0, mainMenuCount - 1);
-    }
-    else
-    {
-      menuIndex[0] = constrain(menuIndex[0] - 1, 0, mainMenuCount - 1);
-    }
-    lastEncoderPos = pos;
-    playBeep(30);
-    drawMenu(mainMenu, mainMenuCount, menuIndex[0]);
-  }
-
-  // Handle button press
-  if (buttonPressed())
-  {
-    playBeep(60);
-    processSelection(menuIndex[0]);
-  }
-}
-
-// 3. Display Functions
-void drawMenu(const char *items[], int len, int index)
-{
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_t0_11_tr);
-
-  // Header bar
-  int16_t strWidth;
-  int16_t x;
-  strWidth = u8g2.getStrWidth("Menu Control");
-  x = (128 - strWidth) / 2;
-
-  u8g2.setDrawColor(1);
-  u8g2.drawBox(0, 0, 128, 12);
-  u8g2.setDrawColor(0);
-  u8g2.drawStr(x, 10, "Menu Control");
-  u8g2.setDrawColor(1);
-
-  // Window calculation (3 visible rows)
-  int start = index - 1;
-  if (start < 0)
-    start = 0;
-  int end = start + 3;
-  if (end > len)
-    end = len;
-
-  // Draw menu items
-  for (int i = start; i < end; i++)
-  {
-    int row = i - start;
-    int yBox = 13 + row * 14;  // box top position
-    int yText = 24 + row * 14; // text baseline
-
-    if (i == index)
-    {
-      // Selected item: inverted colors with box
-      u8g2.setDrawColor(1);
-      u8g2.drawBox(0, yBox, 128, 14);
-      u8g2.setDrawColor(0);
-      u8g2.drawStr(2, yText, items[i]);
-      u8g2.setDrawColor(1);
-    }
-    else
-    {
-      // Unselected item: normal text
-      u8g2.drawStr(2, yText, items[i]);
-    }
-  }
-
-  u8g2.sendBuffer();
-}
-
-void showConfirmDialog(const char *message, bool &value)
-{
-  bool dialogActive = true;
-  int selection = 0;
-  encoder.setPosition(0);
-
-  while (dialogActive)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, "Confirm");
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 28, message);
-
-    // Draw Yes/No options
-    if (selection == 0)
-      u8g2.drawStr(0, 45, ">");
-    u8g2.drawStr(10, 45, "Yes");
-    if (selection == 1)
-      u8g2.drawStr(0, 57, ">");
-    u8g2.drawStr(10, 57, "No");
-    u8g2.sendBuffer();
-
-    encoder.tick();
-    long pos = encoder.getPosition();
-    if (pos != lastEncoderPos)
-    {
-      selection = pos % 2;
-      lastEncoderPos = pos;
-      playBeep(25);
-    }
-
-    if (buttonPressed())
-    {
-      playBeep(50);
-      value = (selection == 0);
-      dialogActive = false;
-    }
-  }
-}
-bool showSaveConfirmDialog()
-{
-  bool dialogActive = true;
-  int selection = 0;
-  encoder.setPosition(0);
-
-  while (dialogActive)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(0, 12, "Save Changes?");
-
-    u8g2.setFont(u8g2_font_6x12_tf);
-    if (selection == 0)
-      u8g2.drawStr(0, 45, ">");
-    u8g2.drawStr(10, 45, "Yes");
-    if (selection == 1)
-      u8g2.drawStr(0, 57, ">");
-    u8g2.drawStr(10, 57, "No");
-    u8g2.sendBuffer();
-
-    encoder.tick();
-    long pos = encoder.getPosition();
-    if (pos != lastEncoderPos)
-    {
-      selection = pos % 2;
-      lastEncoderPos = pos;
-      playBeep(25);
-    }
-
-    if (buttonPressed())
-    {
-      playBeep(50);
-      return (selection == 0);
-    }
-  }
-  return false;
-}
-
-// 4. Settings Management
-void loadSettings()
-{
-  EEPROM.begin(512); // Initialize EEPROM first
-
-  // Check if settings are valid using flag
-  uint8_t validFlag = EEPROM.read(SETTINGS_FLAG_ADDR);
-  uint8_t version = EEPROM.read(SETTINGS_VERSION_ADDR);
-
-  if (validFlag != SETTINGS_VALID_FLAG || version != SETTINGS_VERSION)
-  {
-    Serial.println("First time setup or invalid settings - loading defaults");
-
-    // First time or invalid settings - set defaults
-    settings.nodeRedEnabled = false;
-    strcpy(settings.nodeRedIP, "192.168.0.1");
-    settings.nodeRedPort = 1880;
-    settings.buzzerEnabled = true;
-    settings.startupTime = 60;
-    settings.mfdPerChannel = 4.0f;
-    settings.targetFactor = 0.9;
-    settings.voltHigh = 250.0f;
-    settings.voltLow = 150.0f;
-    settings.powerHigh = 5000.0f;
-    settings.powerLow = 100.0f;
-    settings.freqHigh = 51.0f;
-    settings.freqLow = 49.0f;
-    settings.maxkWh = 1;
-
-    settings.highVoltageAlert = false;
-    settings.lowVoltageAlert = false;
-    settings.highPowerAlert = false;
-    settings.lowPowerAlert = false;
-    settings.highFreqAlert = false;
-    settings.lowFreqAlert = false;
-
-    settings.highVProtec = false;
-    settings.LowVProtec = false;
-    settings.highPProtec = false;
-    settings.highHzProtec = false;
-    settings.lowHzProtec = false;
-    settings.afpcEnabled = false;
-
-    settings.mainOutput = true;
-    settings.kWhSaver = false;
-    settings.totalDays = 0.0;
-
-    settings.afpcLowWatt = 100;   // Default low power threshold
-    settings.afpcHighWatt = 1000; // Default high power threshold
-
-    settings.espShareInterval = 2; // 1.5 second
-    settings.nodeRedInterval = 30; // 30 seconds
-    settings.pzemInterval = 1;     // 1 second
-    settings.alertInterval = 180;  // 3 minutes
-    settings.protectionDelay = 1200;
-
-    // Save defaults and validation flag
-    EEPROM.write(SETTINGS_FLAG_ADDR, SETTINGS_VALID_FLAG);
-    EEPROM.write(SETTINGS_VERSION_ADDR, SETTINGS_VERSION);
-    EEPROM.put(SETTINGS_DATA_ADDR, settings);
-    EEPROM.commit();
-
-    Serial.println("Default settings saved");
-  }
-  else
-  {
-    // Load existing settings
-    EEPROM.get(SETTINGS_DATA_ADDR, settings);
-    Serial.println("Existing settings loaded");
-  }
-}
-
-// Also update saveSettings() function
-void saveSettings()
-{
-  EEPROM.write(SETTINGS_FLAG_ADDR, SETTINGS_VALID_FLAG);
-  EEPROM.put(SETTINGS_DATA_ADDR, settings);
-  if (EEPROM.commit())
-  {
-    Serial.println("Settings saved successfully");
-  }
-  else
-  {
-    Serial.println("Error saving settings!");
-  }
-}
-
-void editNodeRedIP()
-{
-  bool editing = true;
-  int segment = 0;                          // Current IP segment (0-3) and port (4)
-  uint8_t ipSegments[4] = {192, 168, 0, 1}; // Default segments
-  int port = 1880;                          // Default port
-
-  // Parse current IP and port
-  char currentIP[32];
-  strcpy(currentIP, settings.nodeRedIP);
-  char *portStr = strchr(currentIP, ':');
-  if (portStr)
-  {
-    *portStr = '\0'; // Split IP and port
-    port = atoi(portStr + 1);
-    sscanf(currentIP, "%d.%d.%d.%d", &ipSegments[0], &ipSegments[1],
-           &ipSegments[2], &ipSegments[3]);
-  }
-
-  // First show current IP
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 24, "Current IP:");
-  u8g2.drawStr(0, 36, settings.nodeRedIP);
-  u8g2.drawStr(0, 55, "Hold to edit >");
-  u8g2.sendBuffer();
-  delay(3000);
-
-  if (!buttonPressed())
-    return; // Exit if no confirmation to edit
-
-  while (editing)
-  {
-    encoder.setPosition(segment < 4 ? ipSegments[segment] : port);
-
-    while (!buttonPressed())
-    { // Edit current segment until button press
-      u8g2.clearBuffer();
-      u8g2.setFont(u8g2_font_7x14B_tr);
-      u8g2.drawStr(0, 12, "Edit IP Address");
-
-      // Show IP segments with cursor
-      char ipStr[32];
-      snprintf(ipStr, 32, "%d.%d.%d.%d:%d",
-               ipSegments[0], ipSegments[1], ipSegments[2], ipSegments[3], port);
-      u8g2.setFont(u8g2_font_6x12_tf);
-      u8g2.drawStr(0, 35, ipStr);
-
-      // Show cursor under current segment
-      int cursorPos = 0;
-      for (int i = 0; i < segment; i++)
-      {
-        cursorPos += (i < 4 ? (ipSegments[i] < 100 ? (ipSegments[i] < 10 ? 1 : 2) : 3) + 1
-                            : 1);
-      }
-      u8g2.drawStr(cursorPos * 6, 45, "^");
-
-      encoder.tick();
-      long pos = encoder.getPosition();
-      if (pos != lastEncoderPos)
-      {
-        if (segment < 4)
-        {
-          ipSegments[segment] = constrain(pos, 0, 255);
-        }
-        else
-        {
-          port = constrain(pos, 1, 9999);
-        }
-        lastEncoderPos = pos;
-        playBeep(25);
-      }
-
-      u8g2.drawStr(0, 55, "Click for next");
-      u8g2.sendBuffer();
-    }
-
-    segment++;
-    if (segment > 4)
-    { // All segments edited
-      if (showSaveConfirmDialog())
-      {
-        snprintf(settings.nodeRedIP, 32, "%d.%d.%d.%d:%d",
-                 ipSegments[0], ipSegments[1], ipSegments[2], ipSegments[3], port);
-        saveSettings();
-        showMessage("IP Saved!");
-      }
-      else
-      {
-        showMessage("Cancelled!");
-      }
-      editing = false;
-    }
-    delay(200); // Debounce
-  }
-}
-
-// Firebase EEPROM Functions
-void loadFirebaseSettings()
-{
-  EEPROM.get(FB_EEPROM_ADDR, fbSettings);
-
-  // Check if valid, if not set defaults
-  if (fbSettings.validFlag != SETTINGS_VALID_FLAG)
-  {
-    Serial.println("First time Firebase setup - loading defaults");
-    fbSettings.enabled = false;
-    strcpy(fbSettings.host, "");
-    strcpy(fbSettings.auth, "");
-    fbSettings.dataInterval = 10; // Default 10 seconds
-    fbSettings.validFlag = SETTINGS_VALID_FLAG;
-    saveFirebaseSettings();
-  }
-}
-
-void saveFirebaseSettings()
-{
-  fbSettings.validFlag = SETTINGS_VALID_FLAG;
-  EEPROM.put(FB_EEPROM_ADDR, fbSettings);
-  if (EEPROM.commit())
-  {
-    Serial.println("Firebase settings saved");
-  }
-  else
-  {
-    Serial.println("Error saving Firebase settings!");
-  }
-}
-
-void resetFirebaseSettings()
-{
-  fbSettings.enabled = false;
-  strcpy(fbSettings.host, "");
-  strcpy(fbSettings.auth, "");
-  fbSettings.dataInterval = 300;
-  saveFirebaseSettings();
-}
-
-// Add new function to test Firebase connection with one upload
-// Modified testFirebaseConnection() to include output
-bool testFirebaseConnection()
-{
-  if (strlen(fbSettings.host) == 0 || strlen(fbSettings.auth) == 0)
-  {
-    lastFirebaseResponse = "No credentials";
-    return false;
-  }
-
-  // Get current readings snapshot
-  portENTER_CRITICAL(&measureMux);
-  Measurements current = readings;
-  portEXIT_CRITICAL(&measureMux);
-
-  // Build Firebase URL
-  String url = String(fbSettings.host);
-  if (!url.endsWith("/"))
-    url += "/";
-  url += "energy_data.json?auth=" + String(fbSettings.auth);
-
-  // Create test JSON payload
-  StaticJsonDocument<512> doc;
-  doc["test"] = "connection_test";
-  doc["timestamp"] = millis();
-  doc["voltage"] = String(current.voltage, 1);
-  doc["current"] = String(current.current, 2);
-  doc["power"] = String(current.power, 1);
-  doc["energy"] = String(current.energy, 2);
-  doc["frequency"] = String(current.frequency, 2);
-  doc["pf"] = String(current.pf, 2);
-
-  String jsonPayload;
-  serializeJson(doc, jsonPayload);
-
-  HTTPClient http;
-  http.begin(url);
-  http.setTimeout(10000);
-  http.addHeader("Content-Type", "application/json");
-
-  Serial.println("Testing Firebase connection...");
-  int httpCode = http.sendRequest("PATCH", jsonPayload);
-
-  bool success = false;
-  if (httpCode > 0)
-  {
-    if (httpCode == HTTP_CODE_OK || httpCode == 200)
-    {
-      firebaseConnected = true;
-      lastFirebaseResponse = "Success";
-      Serial.println("Firebase test: SUCCESS");
-      success = true;
-    }
-    else
-    {
-      firebaseConnected = false;
-      lastFirebaseResponse = "HTTP " + String(httpCode);
-      Serial.printf("Firebase test: HTTP error %d\n", httpCode);
-    }
-  }
-  else
-  {
-    firebaseConnected = false;
-    lastFirebaseResponse = http.errorToString(httpCode);
-    Serial.printf("Firebase test: %s\n", lastFirebaseResponse.c_str());
-  }
-
-  http.end();
-  return success;
-}
-
-// Firebase Web Portal
-void startFirebaseConfigPortal()
-{
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    showMessage("WiFi Required!");
-    return;
-  }
-
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "Firebase Setup");
-  u8g2.drawStr(0, 24, "Server Started");
-  u8g2.drawStr(0, 36, "IP:");
-  u8g2.drawStr(0, 48, WiFi.localIP().toString().c_str());
-  u8g2.drawStr(0, 60, "Timeout: 180s");
-  u8g2.sendBuffer();
-
-  // Reset flags
-  fbCredentialsSaved = false;
-
-  // Setup Firebase config route (reuse existing server)
-  AsyncWebHandler *firebaseHandler = &server.on("/firebase", HTTP_GET, [](AsyncWebServerRequest *request)
-                                                { request->send(SPIFFS, "/firebaseIndex.html", "text/html"); });
-
-  AsyncWebHandler *saveHandler = &server.on("/firebase/save", HTTP_POST, [](AsyncWebServerRequest *request)
-                                            {
-    if (request->hasParam("url", true) && request->hasParam("token", true)) {
-      String firebaseUrl = request->getParam("url", true)->value();
-      String firebaseToken = request->getParam("token", true)->value();
-
-      // Validate and save
-      if (firebaseUrl.length() < 128 && firebaseToken.length() < 128) {
-        strncpy(fbSettings.host, firebaseUrl.c_str(), 127);
-        strncpy(fbSettings.auth, firebaseToken.c_str(), 127);
-        fbSettings.host[127] = '\0';
-        fbSettings.auth[127] = '\0';
-        saveFirebaseSettings();
-
-        fbCredentialsSaved = true;
-
-        request->send(200, "text/plain", "SAVED");
-        Serial.println("Firebase credentials saved - testing connection...");
-      } else {
-        request->send(400, "text/plain", "INVALID");
-      }
-    } else {
-      request->send(400, "text/plain", "MISSING");
-    } });
-
-  // Wait for 180 seconds or button press
-  unsigned long startTime = millis();
-  const unsigned long timeout = 180000;
-
-  while ((millis() - startTime) < timeout)
-  {
-    unsigned long remaining = (timeout - (millis() - startTime)) / 1000;
-
-    char timeStr[16];
-    snprintf(timeStr, 16, "Time: %lus", remaining);
-    clearLCD(0, 52, 128, 10);
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 60, timeStr);
-    u8g2.sendBuffer();
-
-    // Test connection after credentials saved
-    if (fbCredentialsSaved)
-    {
-      u8g2.clearBuffer();
-      u8g2.drawStr(0, 12, "Testing Firebase...");
-      u8g2.sendBuffer();
-      delay(500);
-
-      // Perform one-time upload test
-      bool testSuccess = testFirebaseConnection();
-
-      if (testSuccess)
-      {
-        u8g2.clearBuffer();
-        u8g2.drawStr(0, 24, "Connection OK!");
-        u8g2.drawStr(0, 36, "Data uploaded!");
-        u8g2.sendBuffer();
-        delay(2000);
-      }
-      else
-      {
-        u8g2.clearBuffer();
-        u8g2.drawStr(0, 24, "Connection Failed!");
-        u8g2.drawStr(0, 36, lastFirebaseResponse.c_str());
-        u8g2.drawStr(0, 48, "Check credentials");
-        u8g2.sendBuffer();
-        delay(3000);
-      }
-      break; // Exit loop after test
-    }
-
-    // Check for button press to exit early
-    if (buttonPressed())
-    {
-      break;
-    }
-
-    yield();
-    delay(500);
-  }
-
-  // **IMPORTANT: Remove the Firebase config routes to prevent misuse**
-  server.removeHandler(firebaseHandler);
-  server.removeHandler(saveHandler);
-
-  // Show cleanup message
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 24, "Config Portal");
-  u8g2.drawStr(0, 36, "Closed!");
-  u8g2.sendBuffer();
-  delay(1000);
-
-  if (!fbCredentialsSaved)
-  {
-    showMessage("Timeout/Cancelled", 2000);
-  }
-}
-
-// Helper: write output state to Firebase (1/0)
-bool writeOutputToFirebase(bool state)
-{
-  if (!fbSettings.enabled || strlen(fbSettings.host) == 0)
-    return false;
-  if (WiFi.status() != WL_CONNECTED)
-    return false;
-
-  String url = String(fbSettings.host);
-  if (!url.endsWith("/"))
-    url += "/";
-  url += "energy_data/output.json?auth=" + String(fbSettings.auth);
-
-  HTTPClient http;
-  http.begin(url);
-  http.setTimeout(5000);
-  http.addHeader("Content-Type", "application/json");
-
-  String payload = state ? "1" : "0"; // number, not string
-  int httpCode = http.PUT(payload);
-  bool ok = (httpCode == 200 || httpCode == HTTP_CODE_OK);
-  if (!ok)
-    Serial.printf("[FB] write output failed: %d\n", httpCode);
-  http.end();
-  return ok;
-}
-
-// Helper: read output state from Firebase ONCE (used only in sendDataToFirebase)
-void readOutputFromFirebase()
-{
-  if (!fbSettings.enabled || strlen(fbSettings.host) == 0)
-    return;
-  if (WiFi.status() != WL_CONNECTED)
-    return;
-
-  String url = String(fbSettings.host);
-  if (!url.endsWith("/"))
-    url += "/";
-  url += "energy_data/output.json?auth=" + String(fbSettings.auth);
-
-  HTTPClient http;
-  http.begin(url);
-  http.setTimeout(4000);
-  int httpCode = http.GET();
-
-  if (httpCode == 200 || httpCode == HTTP_CODE_OK)
-  {
-    String payload = http.getString();
-    payload.trim();
-    int val = -1;
-    if (payload == "1" || payload.equalsIgnoreCase("true"))
-      val = 1;
-    else if (payload == "0" || payload.equalsIgnoreCase("false"))
-      val = 0;
-
-    if (val == 0 || val == 1)
-    {
-      bool newState = (val == 1);
-      if (settings.mainOutput != newState)
-      {
-        settings.mainOutput = newState;
-        saveSettings();
-        digitalWrite(MAIN_RELAY, settings.mainOutput ? LOW : HIGH); // active-low
-        Serial.printf("[FB] pulled output=%d and applied\n", val);
-      }
-    }
-  }
-  else
-  {
-    Serial.printf("[FB] read output failed: %d\n", httpCode);
-  }
-  http.end();
-}
-
-// Send data to Firebase
-void sendDataToFirebase()
-{
-  // Remove static timing check since task handles interval
-  if (!fbSettings.enabled || strlen(fbSettings.host) == 0)
-    return;
-  if (WiFi.status() != WL_CONNECTED)
-    return;
-
-  // Read output from Firebase only at this moment (lazy pull)
-  readOutputFromFirebase();
-
-  // Get snapshot with mutex
-  portENTER_CRITICAL(&measureMux);
-  Measurements current = readings;
-  portEXIT_CRITICAL(&measureMux);
-
-  // Build Firebase URL
-  String url = String(fbSettings.host);
-  if (!url.endsWith("/"))
-    url += "/";
-  url += "energy_data.json?auth=" + String(fbSettings.auth);
-
-  // Create JSON payload
-  StaticJsonDocument<512> doc;
-  doc["timestamp"] = millis();
-  doc["voltage"] = String(current.voltage, 1);
-  doc["current"] = String(current.current, 2);
-  doc["power"] = String(current.power, 1);
-  doc["energy"] = String(current.energy, 2);
-  doc["frequency"] = String(current.frequency, 2);
-  doc["pf"] = String(current.pf, 2);
-  doc["uptime"] = String(current.uptime, 1);
-  doc["totalDays"] = String(current.totalDays, 1);
-  doc["output"] = settings.mainOutput ? 1 : 0;
-
-  String jsonPayload;
-  serializeJson(doc, jsonPayload);
-
-  // Use HTTPClient (safe for Core 0)
-  HTTPClient http;
-  http.begin(url);
-  http.setTimeout(5000);
-  http.addHeader("Content-Type", "application/json");
-
-  Serial.println("[Firebase Core 0] Sending data...");
-  // ✅ Use PATCH to merge data
-  int httpCode = http.sendRequest("PATCH", jsonPayload);
-
-  if (httpCode > 0)
-  {
-    if (httpCode == HTTP_CODE_OK || httpCode == 200)
-    {
-      firebaseConnected = true;
-      lastFirebaseResponse = "Success";
-      Serial.println("[Firebase Core 0] Data sent successfully");
-    }
-    else
-    {
-      firebaseConnected = false;
-      lastFirebaseResponse = "HTTP " + String(httpCode);
-      Serial.printf("[Firebase Core 0] HTTP error %d\n", httpCode);
-    }
-  }
-  else
-  {
-    firebaseConnected = false;
-    lastFirebaseResponse = http.errorToString(httpCode);
-    Serial.printf("[Firebase Core 0] Connection error - %s\n", lastFirebaseResponse.c_str());
-  }
-
-  http.end();
-}
-
-// 8. Others Functions
-void sendDataToNodeRed()
-{
-  static unsigned long lastUpdate = 0;
-  if (millis() - lastUpdate < (settings.nodeRedInterval * 1000))
-    return;
-  lastUpdate = millis();
-
-  if (!settings.nodeRedEnabled || WiFi.status() != WL_CONNECTED)
-  {
-    return; // Exit if Node-RED is disabled or WiFi not connected
-  }
-
-  HTTPClient http;
-
-  // Get IP and port from settings
-  char ip[32];
-  strcpy(ip, settings.nodeRedIP);
-  char *portStr = strchr(ip, ':');
-  if (!portStr)
-    return; // Invalid format
-  *portStr = '\0';
-  String url = "http://" + String(ip) + ":" + String(portStr + 1) + "/pzem-data";
-
-  http.begin(url);
-  http.setTimeout(5000);
-  http.addHeader("Content-Type", "application/json");
-
-  // Get thread-safe copy of measurements
-  portENTER_CRITICAL(&measureMux);
-  Measurements current = readings;
-  portEXIT_CRITICAL(&measureMux);
-
-  // Create JSON payload manually
-  String jsonPayload = "{";
-  jsonPayload += "\"voltage\":" + String(current.voltage, 1) + ",";
-  jsonPayload += "\"current\":" + String(current.current, 2) + ",";
-  jsonPayload += "\"power\":" + String(current.power, 1) + ",";
-  jsonPayload += "\"energy\":" + String(current.energy, 1) + ",";
-  jsonPayload += "\"pf\":" + String(current.pf, 2) + ",";
-  jsonPayload += "\"frequency\":" + String(current.frequency, 1) + ",";
-  jsonPayload += "\"uptime\":" + String(current.uptime, 1) + ",";
-  jsonPayload += "\"totalDays\":" + String(current.totalDays, 1);
-  jsonPayload += "}";
-
-  int httpResponseCode = http.POST(jsonPayload);
-
-  if (httpResponseCode > 0)
-  {
-    nodeRedConnected = true;
-    lastNodeRedResponse = String(httpResponseCode);
-  }
-  else
-  {
-    nodeRedConnected = false;
-    lastNodeRedResponse = http.errorToString(httpResponseCode);
-  }
-
-  http.end();
-}
-
-void shareData()
-{
-  static unsigned long lastCheck = 0;
-  if (millis() - lastCheck < (settings.espShareInterval * 1000))
-    return;
-  lastCheck = millis();
-
-  StaticJsonDocument<1024> doc;
-
-  // Take mutex before reading values
-  portENTER_CRITICAL(&measureMux);
-  Measurements current = readings; // Take a snapshot
-  portEXIT_CRITICAL(&measureMux);
-
-  // Use the snapshot values
-  doc["v"] = String(current.voltage, 1);
-  doc["i"] = String(current.current, 2);
-  doc["p"] = String(current.power, 1);
-  doc["e"] = String(current.energy, 2);
-  doc["f"] = String(current.frequency, 2);
-  doc["pf"] = String(current.pf, 2);
-  doc["up"] = String(current.uptime, 1);
-  doc["d"] = String(kwhDays, 1);
-
-  // All threshold values & settings
-  doc["vh"] = String(settings.voltHigh, 1);
-  doc["vl"] = String(settings.voltLow, 1);
-  doc["ph"] = String(settings.powerHigh, 1);
-  doc["pl"] = String(settings.powerLow, 1);
-  doc["fh"] = String(settings.freqHigh, 2);
-  doc["fl"] = String(settings.freqLow, 2);
-  doc["tpf"] = String(settings.targetFactor, 2);
-  doc["mfd"] = String(settings.mfdPerChannel, 2);
-  doc["max"] = settings.maxkWh;
-  doc["st"] = settings.startupTime;
-  doc["pfl"] = settings.afpcLowWatt;
-  doc["pfh"] = settings.afpcHighWatt;
-
-  // Interval Values
-  doc["esi"] = settings.espShareInterval;
-  doc["nri"] = settings.nodeRedInterval;
-  doc["pzi"] = settings.pzemInterval;
-  doc["sai"] = settings.alertInterval;
-
-  // Status flags
-  doc["hva"] = settings.highVoltageAlert;
-  doc["lva"] = settings.lowVoltageAlert;
-  doc["hpa"] = settings.highPowerAlert;
-  doc["lpa"] = settings.lowPowerAlert;
-  doc["hfa"] = settings.highFreqAlert;
-  doc["lfa"] = settings.lowFreqAlert;
-
-  // Protection flags
-  doc["hvp"] = settings.highVProtec;
-  doc["lvp"] = settings.LowVProtec;
-  doc["hpp"] = settings.highPProtec;
-  doc["hhp"] = settings.highHzProtec;
-  doc["lhp"] = settings.lowHzProtec;
-
-  // Feature flags
-  doc["afpc"] = settings.afpcEnabled;
-  doc["out"] = settings.mainOutput;
-  doc["kwhs"] = settings.kWhSaver;
-
-  // Send with start/end markers
-  espSerial.print('S');
-  serializeJson(doc, espSerial);
-  espSerial.print('E');
-}
-
-void firebaseTaskFunction(void *parameter)
-{
-  Serial.println("Firebase Task started on Core 0");
-
-  // Initial delay to let main core stabilize
-  vTaskDelay(5000 / portTICK_PERIOD_MS);
-
-  for (;;)
-  { // Infinite loop
-    // Only run if Firebase is enabled and WiFi connected
-    if (fbSettings.enabled && strlen(fbSettings.host) > 0 && WiFi.status() == WL_CONNECTED)
-    {
-      sendDataToFirebase();
-    }
-
-    // Wait for the configured interval (non-blocking)
-    vTaskDelay((fbSettings.dataInterval * 1000) / portTICK_PERIOD_MS);
-  }
-}
-
-// 13. Core Functions
-void setup()
-{
-  // 1. Initialize Serial Communications
-  Serial.begin(115200);
-  espSerial.begin(115200, SERIAL_8N1, ESP_COMM_RX, ESP_COMM_TX);
-  Serial2.begin(9600, SERIAL_8N1, 16, 17); // for PZEM
-
-  // 2. Initialize Hardware First!
+void setup() {
+  // 1. Configure Relay & Control Pins FIRST (Both Relays OFF at startup!)
   pinMode(MAIN_RELAY, OUTPUT);
+  digitalWrite(MAIN_RELAY, HIGH);  // Main Output Relay OFF
   pinMode(PZEM_RELAY, OUTPUT);
-  pinMode(RESET_BTN, INPUT);
-  pinMode(ENCODER_SW, INPUT_PULLUP);
+  digitalWrite(PZEM_RELAY, HIGH);  // PZEM AC Input Relay OFF (Delayed Start!)
+
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
-  digitalWrite(MAIN_RELAY, HIGH);
-  digitalWrite(PZEM_RELAY, HIGH);
 
-  // 3. Initialize I2C and Display
-  Wire.begin(22, 23);
+  pinMode(RESET_BTN, INPUT);
+  pinMode(BOOT_BTN, INPUT_PULLUP);
+  pinMode(ENCODER_SW, INPUT_PULLUP);
+
+  // 2. Initialize Serial Buses (CRITICAL FIX: RX=16, TX=17 for PZEM!)
+  Serial.begin(115200);
+  espSerial.begin(115200, SERIAL_8N1, ESP_COMM_RX, ESP_COMM_TX);
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);  // Pin 16 = RX2, Pin 17 = TX2
+
+  // 3. Initialize Display & Show Welcome Message (3 seconds)
   u8g2.begin();
-
-  // 4. Show Welcome Message
-  welcomeMsg();
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_ncenB18_tr);
+  u8g2.drawStr(0, 22, "ESP");
+  u8g2.setFont(u8g2_font_ncenR12_tr);
+  u8g2.drawStr(0, 40, "ENERGY - LOG");
+  u8g2.setFont(u8g2_font_t0_11_tr);
+  u8g2.drawStr(2, 60, "developed by M.Maity");
+  u8g2.sendBuffer();
   delay(3000);
 
-  // 5. Stability Wait Period
-  // const int WAIT_TIME = 15;
-  // for (int i = WAIT_TIME; i > 0; i--) {
-  //   u8g2.clearBuffer();
-  //   u8g2.setFont(u8g2_font_6x12_tf);
-  //   u8g2.drawStr(0, 24, "Wait for stability...");
-  //   char timeStr[16];
-  //   snprintf(timeStr, sizeof(timeStr), "Time: %d sec", i);
-  //   u8g2.drawStr(0, 48, timeStr);
-  //   u8g2.sendBuffer();
-  //   delay(1000);
-  // }
-
-  // Double beep after stability
+  // Double beep after welcome screen
   digitalWrite(BUZZER_PIN, HIGH);
   delay(300);
   digitalWrite(BUZZER_PIN, LOW);
@@ -4420,169 +2658,109 @@ void setup()
   digitalWrite(BUZZER_PIN, LOW);
   delay(100);
 
-  // 6. Initialize Components
-  // Hardware
+  // 4. Step-by-Step Hardware, Encoder, and Storage Init Screen
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x12_tf);
   u8g2.drawStr(0, 12, "Hardware Init...");
   u8g2.sendBuffer();
   delay(300);
 
-  // Encoder
   u8g2.drawStr(0, 24, "Encoder Setup...");
   u8g2.sendBuffer();
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_DT), encoderISR, CHANGE);
-  encoder.setPosition(0);
+  setEncoderPos(0);
   delay(300);
 
-  // Storage
   u8g2.drawStr(0, 36, "Storage Init...");
   u8g2.sendBuffer();
-  EEPROM.begin(512);
-  if (!SPIFFS.begin(true))
-  {
+  if (!SPIFFS.begin(true)) {
     u8g2.drawStr(0, 48, "SPIFFS Error!");
-  }
-  else
-  {
+  } else {
     u8g2.drawStr(0, 48, "SPIFFS OK");
   }
-
   u8g2.sendBuffer();
   delay(300);
 
   preferences.begin("energy-meter", false);
-  kwhDays = preferences.getFloat("days", 0.0);
+  lastResetEpoch = preferences.getULong("rstEpoch", 0);
+  String savedRstStr = preferences.getString("rstTime", "Not Reset");
+  strncpy(lastResetTimeStr, savedRstStr.c_str(), sizeof(lastResetTimeStr) - 1);
+  lastResetTimeStr[sizeof(lastResetTimeStr) - 1] = '\0';
   u8g2.drawStr(0, 60, "Days Fetched!");
   u8g2.sendBuffer();
   delay(300);
 
-  // 7. Load Settings
+  // 5. Load Settings
   u8g2.clearBuffer();
   u8g2.drawStr(0, 12, "Loading Settings...");
   u8g2.sendBuffer();
   loadSettings();
-  loadFirebaseSettings();
-  loadUsersFromFile();
-  loadSchedulesFromFile();
-  loadFutureSchedulesFromFile();
-  PROTECTION_DELAY = settings.protectionDelay * 1000UL;
-  delay(300);
+  loadUsers();
+  loadSchedulesFromNVS();
+  delay(400);
 
-  // 8. WiFi Connection
-  delay(300);
-  connectToSavedWiFi();
+  // 6. Connect to Saved WiFi (with status screen)
+  bootConnectWiFi();
 
-  // 9. Time Configuration
-  configDateTime();
-  delay(300);
+  // 7. Sync NTP Date & Time (with status screen)
+  bootSyncTime();
 
-  // 10. Start Web server (only if WiFi connected at startup)
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Starting Server...");
-    u8g2.sendBuffer();
-    delay(300);
-
-    setupWebServer(); // ← Use the new function
-
+  // 8. Start Web Server & mDNS
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(0, 12, "Starting Server...");
+  u8g2.sendBuffer();
+  setupWebServerRoutes();
+  if (WiFi.status() == WL_CONNECTED) {
+    setupMDNS();
     u8g2.clearBuffer();
     u8g2.drawStr(0, 12, "Server Started!");
     u8g2.drawStr(0, 24, "IP Address:");
     u8g2.drawStr(0, 36, WiFi.localIP().toString().c_str());
     u8g2.sendBuffer();
     delay(2000);
-  }
-  else
-  {
+  } else {
     u8g2.clearBuffer();
-    u8g2.drawStr(0, 12, "WiFi Failed!");
-    u8g2.drawStr(0, 24, "Will auto-start");
-    u8g2.drawStr(0, 36, "when connected");
+    u8g2.drawStr(0, 12, "Offline Mode");
+    u8g2.drawStr(0, 24, "Server Ready");
     u8g2.sendBuffer();
-    delay(2000);
+    delay(1500);
   }
 
-  // 11. System Ready
+  // 9. System Ready -> NOW Turn ON PZEM AC Input Relay (Delayed Start!)
   u8g2.clearBuffer();
   int16_t strWidth = u8g2.getStrWidth("System Ready!");
   int16_t x = (128 - strWidth) / 2;
   u8g2.drawStr(x, 36, "System Ready!");
   u8g2.sendBuffer();
-  digitalWrite(PZEM_RELAY, LOW);
-  delay(1000);
 
-  // 12. Safety Check
-  performSafetyCheck();
+  digitalWrite(PZEM_RELAY, LOW);  // Power ON PZEM sensor now!
+  delay(1500);                    // Wait 1.5s for PZEM-004T to boot & stabilize
 
-  // 13. Start Firebase Task on Core 0
-  if (fbSettings.enabled && strlen(fbSettings.host) > 0)
-  {
-    // u8g2.clearBuffer();
-    // u8g2.setFont(u8g2_font_6x12_tf);
-    // u8g2.drawStr(0, 24, "Starting Firebase");
-    // u8g2.drawStr(0, 36, "on Core 0...");
-    // u8g2.sendBuffer();
-    // delay(1000);
+  // 10. Take initial PZEM reading & send handshake to Secondary ESP32
+  updatePzemReadings();
+  espSerial.println("HELLO");
+  shareDataWithSecondary();
 
-    xTaskCreatePinnedToCore(
-        firebaseTaskFunction, // Function to run
-        "FirebaseTask",       // Task name
-        8192,                 // Stack size (8KB - enough for HTTP)
-        NULL,                 // Parameters
-        1,                    // Priority (same as loop)
-        &firebaseTask,        // Task handle
-        0                     // Core 0 (separate from main loop on Core 1)
-    );
-
-    // u8g2.clearBuffer();
-    // u8g2.drawStr(0, 24, "Firebase Task");
-    // u8g2.drawStr(0, 36, "Started!");
-    // u8g2.sendBuffer();
-    // delay(500);
-  }
-
-  // 14. Show Main Display
-  showMainDisplay();
-
-  espSerial.println("HELLO"); // For Handshaking
-  delay(50);
+  // 11. Flush any accidental button press before entering Startup Safety Check
+  checkEncoderButtonClick();
+  startupRemainingSec = max(5, settings.startupTime);
+  startupCheckCompleted = false;
+  uiState = UI_STARTUP_SAFETY;
+  lastStartupTickMillis = millis();
 }
 
-void loop()
-{
+void loop() {
+  checkBootFactoryReset();
+  updateBuzzer();
   updatePzemReadings();
-  saveTotalDays();
-  sendDataToNodeRed();
-  shareData();
-  checkWiFiAndStartServer();
-
-  if (!menuActive && buttonPressed())
-  {
-    menuActive = true;
-    playBeep(50);
-    encoder.setPosition(0);
-    lastEncoderPos = 0;
-    menuIndex[0] = 0;
-    drawMenu(mainMenu, mainMenuCount, 0);
-  }
-
-  if (menuActive)
-  {
-    handleMenuControl();
-  }
-  else
-  {
-    displayValues();
-    displayDateAndTime();
-  }
-
+  checkTimersAndSchedules();
   controlMainOutput();
   checkSafetyAlerts();
-  checkTimer();
-  checkSchedules();
-  checkFutureSchedules();
+  shareDataWithSecondary();
+  maintainWiFiAndServices();
+  updateNtpSilently();
+  sendDataToNodeRed();
+  updateDisplayAndUI();
 }

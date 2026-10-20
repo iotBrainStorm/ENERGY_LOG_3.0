@@ -1,0 +1,4435 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings — Energy Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="plug_icon.svg" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                "Inter",
+                "-apple-system",
+                "BlinkMacSystemFont",
+                "sans-serif",
+              ],
+              mono: [
+                "JetBrains Mono",
+                "ui-monospace",
+                "SFMono-Regular",
+                "monospace",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Section visibility */
+      .settings-section {
+        display: none;
+        animation: fadeIn 0.2s ease;
+      }
+      .settings-section.active {
+        display: block;
+      }
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* Sidebar Nav Active State */
+      .nav-item.active {
+        background-color: rgba(37, 99, 235, 0.14);
+        color: #60a5fa;
+        border-color: rgba(59, 130, 246, 0.3);
+      }
+
+      /* Custom Toggle Switch */
+      .toggle {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+        flex-shrink: 0;
+      }
+      .toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        inset: 0;
+        background-color: #020617;
+        border: 1px solid #334155;
+        border-radius: 9999px;
+        transition: all 0.25s ease;
+      }
+      .toggle-slider:before {
+        content: "";
+        position: absolute;
+        height: 18px;
+        width: 18px;
+        left: 2px;
+        bottom: 2px;
+        background-color: #64748b;
+        border-radius: 50%;
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .toggle input:checked + .toggle-slider {
+        background-color: #2563eb;
+        border-color: #3b82f6;
+      }
+      .toggle input:checked + .toggle-slider:before {
+        transform: translateX(20px);
+        background-color: #ffffff;
+      }
+
+      /* Modal Overlay */
+      .modal-overlay {
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          opacity 0.2s ease,
+          visibility 0.2s ease;
+      }
+      .modal-overlay.active {
+        opacity: 1;
+        visibility: visible;
+      }
+      .modal-overlay .modal-box {
+        transform: scale(0.96) translateY(8px);
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .modal-overlay.active .modal-box {
+        transform: scale(1) translateY(0);
+      }
+
+      /* Schedule Action & Day Pills */
+      .day-pill.active {
+        background-color: #2563eb;
+        border-color: #3b82f6;
+        color: #ffffff;
+      }
+      .action-btn.active {
+        border-color: #10b981;
+        background-color: rgba(16, 185, 129, 0.12);
+        color: #34d399;
+      }
+      .action-btn.off.active {
+        border-color: #f43f5e;
+        background-color: rgba(244, 63, 94, 0.12);
+        color: #fb7185;
+      }
+
+      /* Hide number input arrows */
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type="number"] {
+        -moz-appearance: textfield;
+      }
+    </style>
+  </head>
+
+  <body
+    class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col selection:bg-blue-500/30 selection:text-blue-200 antialiased"
+  >
+    <!-- Mobile Top Bar -->
+    <header
+      class="md:hidden fixed top-0 left-0 right-0 h-14 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 flex items-center justify-between z-40"
+    >
+      <button
+        onclick="toggleSidebar()"
+        class="w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-300 hover:text-white"
+        aria-label="Toggle Menu"
+      >
+        <svg
+          class="w-5 h-5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-semibold tracking-tight text-white"
+          >System Configuration</span
+        >
+      </div>
+      <a
+        href="index.html"
+        class="w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center text-slate-300 hover:text-blue-400 hover:border-blue-500/40"
+        title="Back to Dashboard"
+      >
+        <svg
+          class="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      </a>
+    </header>
+
+    <!-- Mobile Sidebar Backdrop -->
+    <div
+      id="sidebar-overlay"
+      onclick="toggleSidebar()"
+      class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-30 hidden md:hidden"
+    ></div>
+
+    <!-- App Layout -->
+    <div class="flex-1 flex flex-col md:flex-row pt-14 md:pt-0">
+      <!-- Sidebar -->
+      <aside
+        id="sidebar"
+        class="fixed md:sticky top-14 md:top-0 left-0 z-40 w-64 md:w-64 h-[calc(100vh-3.5rem)] md:h-screen bg-slate-900/95 border-r border-slate-800/90 flex flex-col shrink-0 -translate-x-full md:translate-x-0 transition-transform duration-200"
+      >
+        <!-- Desktop Sidebar Header -->
+        <div
+          class="hidden md:flex items-center justify-between px-5 py-4 border-b border-slate-800/90"
+        >
+          <a href="index.html" class="flex items-center gap-3 group">
+            <div
+              class="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 group-hover:border-blue-500/50 flex items-center justify-center text-slate-400 group-hover:text-blue-400 transition-colors"
+            >
+              <svg
+                class="w-4 h-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </div>
+            <div>
+              <span class="text-sm font-semibold text-white block leading-none"
+                >Settings</span
+              >
+              <span class="text-[11px] text-slate-500">Back to Dashboard</span>
+            </div>
+          </a>
+        </div>
+
+        <!-- Navigation List -->
+        <nav class="flex-1 overflow-y-auto p-3 space-y-4">
+          <!-- Connection Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Connection
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item active flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="wifi"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                  <line x1="12" y1="20" x2="12.01" y2="20" />
+                </svg>
+                <span>WiFi Network</span>
+              </div>
+
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="mdns"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                  <path
+                    d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+                  />
+                </svg>
+                <span>mDNS Address</span>
+              </div>
+
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="nodered"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                <span>Node-RED</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Power Control Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Power Control
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="output"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                  <line x1="12" y1="2" x2="12" y2="12" />
+                </svg>
+                <span>Main Output</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="afpc"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+                <span>AFPC Control</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Safety Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Safety &amp; Limits
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="thresholds"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <line x1="4" y1="21" x2="4" y2="14" />
+                  <line x1="4" y1="10" x2="4" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12" y2="3" />
+                  <line x1="20" y1="21" x2="20" y2="16" />
+                  <line x1="20" y1="12" x2="20" y2="3" />
+                  <line x1="1" y1="14" x2="7" y2="14" />
+                  <line x1="9" y1="8" x2="15" y2="8" />
+                  <line x1="17" y1="16" x2="23" y2="16" />
+                </svg>
+                <span>Thresholds</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="alerts"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+                <span>Safety Alerts</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="protection"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span>Protection</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Automation Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Automation
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="automation"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span>Timer &amp; Schedule</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              System
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="intervals"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                <span>Update Intervals</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="startup"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                <span>Startup</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="data"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <ellipse cx="12" cy="5" rx="9" ry="3" />
+                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                </svg>
+                <span>Data &amp; System</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="about"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span>About Device</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Account Group -->
+          <div>
+            <div
+              class="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500"
+            >
+              Account &amp; Access
+            </div>
+            <div class="space-y-1">
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="show-users"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                <span>Registered Users</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="add-user"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="8.5" cy="7" r="4" />
+                  <line x1="20" y1="8" x2="20" y2="14" />
+                  <line x1="23" y1="11" x2="17" y2="11" />
+                </svg>
+                <span>Add User</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="remove-user"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="8.5" cy="7" r="4" />
+                  <line x1="23" y1="11" x2="17" y2="11" />
+                </svg>
+                <span>Remove User</span>
+              </div>
+            </div>
+          </div>
+        </nav>
+      </aside>
+
+      <!-- Main Content + Bottom Footer Column -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <main class="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-8">
+          <!-- 1. WiFi Section -->
+          <section class="settings-section active" id="section-wifi">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                WiFi Network
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Manage wireless connectivity and credentials
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Connection Status</span
+                >
+                <span
+                  id="wifi-status-badge"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-400"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                  <span id="wifi-status-text">Checking...</span>
+                </span>
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-xs text-slate-400"
+                    >Network Name (SSID)</span
+                  >
+                  <span
+                    id="wifi-ssid"
+                    class="text-xs font-mono font-medium text-slate-200"
+                    >---</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-xs text-slate-400">IPv4 Address</span>
+                  <span
+                    id="wifi-ip"
+                    class="text-xs font-mono font-medium text-slate-200"
+                    >---</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-xs text-slate-400"
+                    >Signal Strength (RSSI)</span
+                  >
+                  <span
+                    id="wifi-rssi"
+                    class="text-xs font-mono font-medium text-slate-200"
+                    >---</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden"
+            >
+              <div class="px-5 py-3.5 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Network Actions</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Launch WiFi Portal
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Start AP "ESP.EnergyLog" to configure WiFi
+                    </div>
+                  </div>
+                  <button
+                    onclick="connectWiFi()"
+                    class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shrink-0"
+                  >
+                    Connect WiFi
+                  </button>
+                </div>
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Disconnect Session
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Disconnect from the current wireless network
+                    </div>
+                  </div>
+                  <button
+                    onclick="disconnectWiFi()"
+                    class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors shrink-0"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Forget Saved Network
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Erase stored WiFi credentials and reboot
+                    </div>
+                  </div>
+                  <button
+                    onclick="forgetWiFi()"
+                    class="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors shrink-0"
+                  >
+                    Forget WiFi
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 2. mDNS Section (NEW) -->
+          <section class="settings-section" id="section-mdns">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                mDNS Local Domain
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Access your energy monitor via a human-readable
+                <span class="font-mono text-slate-300">.local</span> address
+              </p>
+            </div>
+
+            <div
+              class="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 mb-5 flex items-start gap-3"
+            >
+              <svg
+                class="w-4 h-4 text-blue-400 shrink-0 mt-0.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <div class="text-xs text-slate-300 leading-relaxed">
+                Default hostname is
+                <span
+                  id="mdns-default-label"
+                  class="font-mono font-semibold text-blue-300"
+                  >energylog-XXXX.local</span
+                >
+                (where <span class="font-mono">XXXX</span> is the last 4
+                characters of the device MAC address).
+              </div>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >mDNS Configuration</span
+                >
+                <span
+                  id="mdns-active-url"
+                  class="font-mono text-[11px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 rounded-md"
+                >
+                  http://energylog-XXXX.local
+                </span>
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <!-- Enable / Disable mDNS -->
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Enable mDNS Responder
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Broadcast local hostname on the network
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="mdns-enabled"
+                      checked
+                      onchange="saveSetting('mdnsEnabled', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <!-- Custom mDNS Address Input -->
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Custom mDNS Address
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Alphanumeric &amp; hyphens only (e.g.
+                      <span class="font-mono">energylog-home</span>)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 focus-within:border-blue-500 rounded-xl overflow-hidden transition-colors"
+                  >
+                    <input
+                      type="text"
+                      id="mdns-hostname"
+                      placeholder="energylog-XXXX"
+                      oninput="updateMdnsPreview(this.value)"
+                      class="px-3.5 py-2 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 outline-none w-44 sm:w-48"
+                    />
+                    <span
+                      class="px-3 py-2 bg-slate-900 border-l border-slate-800 text-xs font-mono text-slate-400 select-none"
+                      >.local</span
+                    >
+                  </div>
+                </div>
+
+                <!-- Default Address Reference -->
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <span class="text-xs text-slate-400"
+                    >Default Factory Hostname</span
+                  >
+                  <span
+                    id="mdns-default-host"
+                    class="text-xs font-mono text-slate-300"
+                    >energylog-XXXX.local</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <!-- mDNS Action Buttons -->
+            <div class="flex flex-wrap items-center gap-2.5">
+              <button
+                onclick="saveMdnsSettings()"
+                class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+              >
+                Save Custom mDNS
+              </button>
+              <button
+                onclick="resetMdnsDefault()"
+                class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition-colors"
+              >
+                Reset to Default
+              </button>
+              <button
+                onclick="
+                  showConfirmModal(
+                    'deleteMdns',
+                    'Delete Custom mDNS?',
+                    'This will delete the custom mDNS address and revert or disable custom responder.',
+                    'danger',
+                  )
+                "
+                class="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors"
+              >
+                Delete Custom mDNS
+              </button>
+            </div>
+          </section>
+
+          <!-- 3. Node-RED Section -->
+          <section class="settings-section" id="section-nodered">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Node-RED Integration
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Stream real-time telemetry to a Node-RED server
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Enable Node-RED Streaming
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Push JSON payloads to Node-RED endpoint
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="nodered-enabled"
+                      onchange="saveSetting('nodeRedEnabled', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Server IP Address
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      IPv4 address of your Node-RED host
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    id="nodered-ip"
+                    placeholder="192.168.1.100"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-slate-100 placeholder-slate-600 outline-none w-full sm:w-48"
+                  />
+                </div>
+
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Server Port
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Default Node-RED HTTP port is 1880
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    id="nodered-port"
+                    value="1880"
+                    min="1"
+                    max="65535"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-slate-100 outline-none w-full sm:w-28 text-center"
+                  />
+                </div>
+
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Endpoint Reachability
+                    </div>
+                    <div
+                      id="nodered-status"
+                      class="text-[11px] font-mono text-slate-500"
+                    >
+                      ---
+                    </div>
+                  </div>
+                  <button
+                    onclick="testNodeRed()"
+                    class="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+                  >
+                    Test Connection
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveNodeRedSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Node-RED Settings
+            </button>
+          </section>
+
+          <!-- 4. Main Output Section -->
+          <section class="settings-section" id="section-output">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Main Output Control
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Configure primary relay state and energy-saver cutoff
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Main Output Relay
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Directly enable or disable load power
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="main-output"
+                      onchange="saveSetting('mainOutput', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      kWh Energy Saver
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Automatically cut off output when Max kWh limit is reached
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="kwh-saver"
+                      onchange="saveSetting('kWhSaver', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveOutputSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Output Settings
+            </button>
+          </section>
+
+          <!-- 5. AFPC Section -->
+          <section class="settings-section" id="section-afpc">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Automatic Power Factor Correction
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Configure capacitor bank switching parameters
+              </p>
+            </div>
+
+            <div
+              class="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 mb-5 flex items-start gap-3"
+            >
+              <svg
+                class="w-4 h-4 text-blue-400 shrink-0 mt-0.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              <span class="text-xs text-slate-300 leading-relaxed">
+                AFPC automatically switches capacitor banks in real time to
+                maintain your target power factor.
+              </span>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Enable AFPC
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Activate automatic capacitor bank correction
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="afpc-enabled"
+                      onchange="saveSetting('afpcEnabled', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Target Power Factor
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Desired PF threshold (0.50 – 0.99)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 focus-within:border-blue-500 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="target-pf"
+                      value="0.90"
+                      min="0.50"
+                      max="0.99"
+                      step="0.01"
+                      onchange="
+                        saveSetting('targetFactor', parseFloat(this.value))
+                      "
+                      class="w-20 px-3 py-2 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-2 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >PF</span
+                    >
+                  </div>
+                </div>
+
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Capacitance Per Channel
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      MFD rating per relay step
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 focus-within:border-blue-500 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="mfd-channel"
+                      value="4.0"
+                      min="0.1"
+                      max="15.0"
+                      step="0.1"
+                      onchange="
+                        saveSetting('mfdPerChannel', parseFloat(this.value))
+                      "
+                      class="w-20 px-3 py-2 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-2 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >&mu;F</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveAfpcSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save AFPC Settings
+            </button>
+          </section>
+
+          <!-- 6. Thresholds Section -->
+          <section class="settings-section" id="section-thresholds">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Safety Thresholds
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Define operating boundaries for voltage, power, and frequency
+              </p>
+            </div>
+
+            <!-- Voltage Limits -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-amber-400"
+                  >Voltage Limits</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Voltage Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Over-voltage boundary (150–280V)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="volt-high"
+                      value="250"
+                      min="150"
+                      max="280"
+                      onchange="saveSetting('voltHigh', parseInt(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >V</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Voltage Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Under-voltage boundary (120–250V)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="volt-low"
+                      value="180"
+                      min="120"
+                      max="250"
+                      onchange="saveSetting('voltLow', parseInt(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >V</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Power Limits -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-rose-400"
+                  >Power &amp; Energy Limits</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Power Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Overload threshold (100–9900W)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="power-high"
+                      value="3000"
+                      min="100"
+                      max="9900"
+                      step="100"
+                      onchange="saveSetting('powerHigh', parseInt(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >W</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Power Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Minimum load threshold
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="power-low"
+                      value="100"
+                      min="100"
+                      max="9900"
+                      step="100"
+                      onchange="saveSetting('powerLow', parseInt(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >W</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Max kWh Quota
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cutoff threshold for Energy Saver
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="max-kwh"
+                      value="100"
+                      min="1"
+                      max="9000"
+                      step="5"
+                      onchange="saveSetting('maxkWh', parseInt(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >kWh</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Frequency & AFPC Limits -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-cyan-400"
+                  >Frequency &amp; AFPC Range</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Frequency Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Over-frequency boundary
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="freq-high"
+                      value="50.50"
+                      min="49.00"
+                      max="51.00"
+                      step="0.01"
+                      onchange="saveSetting('freqHigh', parseFloat(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >Hz</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Frequency Limit
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Under-frequency boundary
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="freq-low"
+                      value="49.50"
+                      min="49.00"
+                      max="51.00"
+                      step="0.01"
+                      onchange="saveSetting('freqLow', parseFloat(this.value))"
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >Hz</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      AFPC Low Watt
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Minimum load for AFPC activation
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="afpc-low"
+                      value="50"
+                      min="1"
+                      max="9900"
+                      onchange="
+                        saveSetting('afpcLowWatt', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >W</span
+                    >
+                  </div>
+                </div>
+                <div class="py-3.5 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      AFPC High Watt
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Maximum load for AFPC operation
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="afpc-high"
+                      value="3000"
+                      min="100"
+                      max="9900"
+                      step="50"
+                      onchange="
+                        saveSetting('afpcHighWatt', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >W</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveThresholdSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save All Thresholds
+            </button>
+          </section>
+
+          <!-- 7. Safety Alerts Section -->
+          <section class="settings-section" id="section-alerts">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Safety Buzzer Alerts
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Configure audible warnings when parameters exceed limits (output
+                stays ON)
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Voltage Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep on over-voltage
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-volt-high"
+                      onchange="saveSetting('highVoltageAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Voltage Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep on under-voltage
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-volt-low"
+                      onchange="saveSetting('lowVoltageAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Power Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep when load exceeds high limit
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-power-high"
+                      onchange="saveSetting('highPowerAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Power Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep when load drops below low limit
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-power-low"
+                      onchange="saveSetting('lowPowerAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Under Frequency Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep on low grid frequency
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-freq-low"
+                      onchange="saveSetting('lowFreqAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Over Frequency Alert
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Audible beep on high grid frequency
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="alert-freq-high"
+                      onchange="saveSetting('highFreqAlert', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveAlertSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Alert Settings
+            </button>
+          </section>
+
+          <!-- 8. Protection Section -->
+          <section class="settings-section" id="section-protection">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Automatic Cutoff Protection
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Trip the main relay automatically during critical fault
+                conditions
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Voltage Protection
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cut off output on over-voltage
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="prot-volt-high"
+                      onchange="saveSetting('highVProtec', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Voltage Protection
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cut off output on under-voltage
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="prot-volt-low"
+                      onchange="saveSetting('LowVProtec', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Power Overload Protection
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cut off output when overload limit is exceeded
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="prot-power-high"
+                      onchange="saveSetting('highPProtec', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      High Frequency Protection
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cut off output on over-frequency
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="prot-freq-high"
+                      onchange="saveSetting('highHzProtec', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Low Frequency Protection
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Cut off output on under-frequency
+                    </div>
+                  </div>
+                  <label class="toggle">
+                    <input
+                      type="checkbox"
+                      id="prot-freq-low"
+                      onchange="saveSetting('lowHzProtec', this.checked)"
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveProtectionSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Protection Settings
+            </button>
+          </section>
+
+          <!-- 9. Update Intervals Section -->
+          <section class="settings-section" id="section-intervals">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                System Polling &amp; Delays
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Fine-tune sampling, telemetry, and recovery intervals
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      ESP Data Sharing
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      ESP-to-ESP sync interval (1–300s)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="interval-esp"
+                      value="2"
+                      min="1"
+                      max="300"
+                      onchange="
+                        saveSetting('espShareInterval', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >sec</span
+                    >
+                  </div>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Node-RED Push Interval
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Payload transmit frequency (5–300s)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="interval-nodered"
+                      value="5"
+                      min="5"
+                      max="300"
+                      onchange="
+                        saveSetting('nodeRedInterval', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >sec</span
+                    >
+                  </div>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      PZEM Sensor Polling
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Meter hardware read interval (1–60s)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="interval-pzem"
+                      value="1"
+                      min="1"
+                      max="60"
+                      onchange="
+                        saveSetting('pzemInterval', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >sec</span
+                    >
+                  </div>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Safety Alert Check
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Interval between buzzer alerts (15–600s)
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="interval-alert"
+                      value="15"
+                      min="15"
+                      max="600"
+                      step="5"
+                      onchange="
+                        saveSetting('alertInterval', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >sec</span
+                    >
+                  </div>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Protection Recovery Delay
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Wait time before restoring output after trip
+                    </div>
+                  </div>
+                  <div
+                    class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                  >
+                    <input
+                      type="number"
+                      id="interval-protection"
+                      value="1200"
+                      min="60"
+                      max="3600"
+                      step="60"
+                      onchange="
+                        saveSetting('protectionDelay', parseInt(this.value))
+                      "
+                      class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                    />
+                    <span
+                      class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                      >sec</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveIntervalSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Interval Settings
+            </button>
+          </section>
+
+          <!-- 10. Startup Section -->
+          <section class="settings-section" id="section-startup">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Startup Behavior
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Configure initial boot stabilization delay
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="px-5 py-4 flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-xs font-medium text-slate-200">
+                    Startup Relay Delay
+                  </div>
+                  <div class="text-[11px] text-slate-500">
+                    Wait time before engaging output after power-on (0–300s)
+                  </div>
+                </div>
+                <div
+                  class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                >
+                  <input
+                    type="number"
+                    id="startup-delay"
+                    value="60"
+                    min="0"
+                    max="300"
+                    onchange="saveSetting('startupTime', parseInt(this.value))"
+                    class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
+                  />
+                  <span
+                    class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                    >sec</span
+                  >
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="saveStartupSettings()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Save Startup Settings
+            </button>
+          </section>
+
+          <!-- 11. Data Management & System Section -->
+          <section class="settings-section" id="section-data">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Data &amp; System Maintenance
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Manage accumulated counters, NTP clock sync, and factory resets
+              </p>
+            </div>
+
+            <!-- Clear Counters -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Telemetry Counters</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Reset Energy Counter
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Zero out accumulated kWh &amp; save reset timestamp
+                      (Requires NTP)
+                    </div>
+                  </div>
+                  <button
+                    onclick="
+                      showConfirmModal(
+                        'clearEnergy',
+                        'Reset Energy Counter?',
+                        'This will reset kWh to zero and save the current NTP timestamp as the start of Last Billing.',
+                        'warning',
+                      )
+                    "
+                    class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors shrink-0"
+                  >
+                    Clear kWh
+                  </button>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Reset Last Billing Counter
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Restart billing elapsed days from current NTP time
+                    </div>
+                  </div>
+                  <button
+                    onclick="
+                      showConfirmModal(
+                        'clearDays',
+                        'Reset Last Billing?',
+                        'This will reset the Last Billing days counter to zero using current NTP time.',
+                        'warning',
+                      )
+                    "
+                    class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors shrink-0"
+                  >
+                    Reset Billing
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- System & Time Control -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Clock &amp; Device Control</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div
+                  class="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Time Zone
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Regional offset for NTP time synchronization
+                    </div>
+                  </div>
+                  <select
+                    id="timezone-select"
+                    onchange="saveTimezone(this.value)"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-200 outline-none"
+                  >
+                    <option value="-43200">BIT (UTC-12:00)</option>
+                    <option value="-39600">SST (UTC-11:00)</option>
+                    <option value="-36000">HST (UTC-10:00)</option>
+                    <option value="-34200">MART (UTC-9:30)</option>
+                    <option value="-32400">AKST (UTC-9:00)</option>
+                    <option value="-28800">PST (UTC-8:00)</option>
+                    <option value="-25200">MST (UTC-7:00)</option>
+                    <option value="-21600">CST (UTC-6:00)</option>
+                    <option value="-18000">EST (UTC-5:00)</option>
+                    <option value="-16200">VET (UTC-4:30)</option>
+                    <option value="-14400">AST (UTC-4:00)</option>
+                    <option value="-12600">NST (UTC-3:30)</option>
+                    <option value="-10800">ART (UTC-3:00)</option>
+                    <option value="-7200">GST (UTC-2:00)</option>
+                    <option value="-3600">AZOT (UTC-1:00)</option>
+                    <option value="0">UTC (UTC+0:00)</option>
+                    <option value="3600">CET (UTC+1:00)</option>
+                    <option value="7200">EET (UTC+2:00)</option>
+                    <option value="10800">MSK (UTC+3:00)</option>
+                    <option value="12600">IRST (UTC+3:30)</option>
+                    <option value="14400">GST (UTC+4:00)</option>
+                    <option value="16200">AFT (UTC+4:30)</option>
+                    <option value="18000">PKT (UTC+5:00)</option>
+                    <option value="19800" selected>IST (UTC+5:30)</option>
+                    <option value="20700">NPT (UTC+5:45)</option>
+                    <option value="21600">BST (UTC+6:00)</option>
+                    <option value="23400">MMT (UTC+6:30)</option>
+                    <option value="25200">ICT (UTC+7:00)</option>
+                    <option value="28800">CST (UTC+8:00)</option>
+                    <option value="30600">CWST (UTC+8:30)</option>
+                    <option value="31500">ACWST (UTC+8:45)</option>
+                    <option value="32400">JST (UTC+9:00)</option>
+                    <option value="34200">ACST (UTC+9:30)</option>
+                    <option value="36000">AEST (UTC+10:00)</option>
+                    <option value="37800">LHST (UTC+10:30)</option>
+                    <option value="39600">SBT (UTC+11:00)</option>
+                    <option value="43200">NZST (UTC+12:00)</option>
+                    <option value="45900">CHAST (UTC+12:45)</option>
+                    <option value="46800">TOT (UTC+13:00)</option>
+                    <option value="50400">LINT (UTC+14:00)</option>
+                  </select>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Synchronize NTP Clock
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Fetch current time from NTP server
+                    </div>
+                  </div>
+                  <button
+                    onclick="syncTime()"
+                    class="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition-colors"
+                  >
+                    Update Time
+                  </button>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Restart Controller
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Soft reboot the ESP32 microcontroller
+                    </div>
+                  </div>
+                  <button
+                    onclick="
+                      showConfirmModal(
+                        'restartDevice',
+                        'Restart Device?',
+                        'This will reboot the ESP32. The dashboard will reconnect in a few seconds.',
+                        'warning',
+                      )
+                    "
+                    class="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors"
+                  >
+                    Restart
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Factory Reset -->
+            <div
+              class="bg-slate-900/80 border border-rose-900/40 rounded-2xl overflow-hidden"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-rose-400"
+                  >Danger Zone</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Reset All Telemetry Data
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Permanently erase all accumulated energy &amp; runtime
+                      logs
+                    </div>
+                  </div>
+                  <button
+                    onclick="
+                      showConfirmModal(
+                        'factoryResetData',
+                        'Reset ALL Data?',
+                        'This will clear all counters and measurements. This action cannot be undone.',
+                        'danger',
+                      )
+                    "
+                    class="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors shrink-0"
+                  >
+                    Reset Data
+                  </button>
+                </div>
+                <div class="py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Factory Reset All Settings
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Restore default parameters, erase WiFi credentials, and
+                      reboot
+                    </div>
+                  </div>
+                  <button
+                    onclick="
+                      showConfirmModal(
+                        'factoryResetSettings',
+                        'Factory Reset Settings?',
+                        'This will restore all settings to factory defaults and remove WiFi credentials.',
+                        'danger',
+                      )
+                    "
+                    class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium transition-colors shrink-0"
+                  >
+                    Factory Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 12. About Section -->
+          <section class="settings-section" id="section-about">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                About Device
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                System hardware and firmware specifications
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden"
+            >
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div class="py-3.5 flex items-center justify-between">
+                  <span class="text-xs text-slate-400">Device Name</span>
+                  <span class="text-xs font-medium text-slate-200"
+                    >ESP Energy Monitor</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between">
+                  <span class="text-xs text-slate-400">Firmware Version</span>
+                  <span class="text-xs font-mono font-medium text-blue-400"
+                    >v3.0</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between">
+                  <span class="text-xs text-slate-400"
+                    >Hardware Architecture</span
+                  >
+                  <span class="text-xs font-mono text-slate-200"
+                    >ESP32 + PZEM-004T</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between">
+                  <span class="text-xs text-slate-400"
+                    >Default mDNS Hostname</span
+                  >
+                  <span id="about-mdns" class="text-xs font-mono text-cyan-400"
+                    >energylog-XXXX.local</span
+                  >
+                </div>
+                <div class="py-3.5 flex items-center justify-between">
+                  <span class="text-xs text-slate-400">Developer</span>
+                  <span class="text-xs font-medium text-slate-200"
+                    >M. Maity</span
+                  >
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 13. Automation Section -->
+          <section class="settings-section" id="section-automation">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Timer &amp; Schedules
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Automate relay switching using countdowns or recurring schedules
+              </p>
+            </div>
+
+            <!-- Quick Timer -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Quick Countdown Timer (Volatile)</span
+                >
+                <span
+                  id="timer-status"
+                  class="text-[11px] font-mono text-slate-400"
+                  >Not active</span
+                >
+              </div>
+              <div class="p-5 space-y-4">
+                <div
+                  class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Countdown Duration
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Turns OFF main output when timer expires
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <div
+                      class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                    >
+                      <input
+                        type="number"
+                        id="timer-hours"
+                        value="0"
+                        min="0"
+                        max="23"
+                        class="w-14 px-2.5 py-1.5 bg-transparent text-xs font-mono text-center text-slate-100 outline-none"
+                      />
+                      <span
+                        class="px-2 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                        >h</span
+                      >
+                    </div>
+                    <div
+                      class="flex items-center bg-slate-950 border border-slate-800 rounded-xl overflow-hidden"
+                    >
+                      <input
+                        type="number"
+                        id="timer-minutes"
+                        value="30"
+                        min="0"
+                        max="59"
+                        class="w-14 px-2.5 py-1.5 bg-transparent text-xs font-mono text-center text-slate-100 outline-none"
+                      />
+                      <span
+                        class="px-2 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
+                        >m</span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2.5 pt-1">
+                  <button
+                    onclick="startTimer()"
+                    class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+                  >
+                    Start Timer
+                  </button>
+                  <button
+                    onclick="cancelTimer()"
+                    class="px-4 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Daily Schedule -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >Daily Schedules (Persistent)</span
+                >
+                <button
+                  onclick="showAddScheduleModal()"
+                  class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+                >
+                  + Add Schedule
+                </button>
+              </div>
+              <div
+                id="schedule-list"
+                class="divide-y divide-slate-800/60 px-5 py-2"
+              >
+                <div class="py-3 text-xs text-slate-500">
+                  No schedules configured
+                </div>
+              </div>
+            </div>
+
+            <!-- Future One-Time Schedule -->
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >One-Time Future Schedules</span
+                >
+                <button
+                  onclick="showAddFutureScheduleModal()"
+                  class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+                >
+                  + Add One-Time
+                </button>
+              </div>
+              <div
+                id="future-schedule-list"
+                class="divide-y divide-slate-800/60 px-5 py-2"
+              >
+                <div class="py-3 text-xs text-slate-500">
+                  No future schedules configured
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 14. Show Users Section -->
+          <section class="settings-section" id="section-show-users">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Registered Accounts
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Users authorized to access this device
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden"
+            >
+              <div
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >User Directory</span
+                >
+                <button
+                  onclick="loadUsers()"
+                  class="px-3 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+                >
+                  Refresh
+                </button>
+              </div>
+              <div id="user-list" class="p-4 space-y-2.5">
+                <div
+                  class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800/80"
+                >
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-xs font-semibold text-blue-400"
+                    >
+                      E
+                    </div>
+                    <div>
+                      <div class="text-xs font-semibold text-slate-200">
+                        esp
+                      </div>
+                      <div class="text-[11px] text-slate-500">
+                        Administrator (default)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 15. Add User Section -->
+          <section class="settings-section" id="section-add-user">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Create User Account
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Add a new operator or administrator account
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >1. Admin Authorization</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">Admin Username</span>
+                  <input
+                    type="text"
+                    id="add-admin-user"
+                    placeholder="Admin username"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">Admin Password</span>
+                  <input
+                    type="password"
+                    id="add-admin-pass"
+                    placeholder="Admin password"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >2. New Account Details</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">New Username</span>
+                  <input
+                    type="text"
+                    id="new-username"
+                    placeholder="Min 3 characters"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">New Password</span>
+                  <input
+                    type="password"
+                    id="new-password"
+                    placeholder="Min 4 characters"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">Role Permission</span>
+                  <select
+                    id="new-role"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  >
+                    <option value="user">Standard User</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onclick="addUser()"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+            >
+              Create User
+            </button>
+          </section>
+
+          <!-- 16. Remove User Section -->
+          <section class="settings-section" id="section-remove-user">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                Remove User Account
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Revoke user access (at least one administrator must remain)
+              </p>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-4"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >1. Admin Authorization</span
+                >
+              </div>
+              <div class="divide-y divide-slate-800/60 px-5">
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">Admin Username</span>
+                  <input
+                    type="text"
+                    id="rm-admin-user"
+                    placeholder="Admin username"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+                <div
+                  class="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                  <span class="text-xs text-slate-300">Admin Password</span>
+                  <input
+                    type="password"
+                    id="rm-admin-pass"
+                    placeholder="Admin password"
+                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div
+              class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
+            >
+              <div class="px-5 py-3 border-b border-slate-800/80">
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >2. Target Account</span
+                >
+              </div>
+              <div
+                class="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
+                <span class="text-xs text-slate-300">Select User</span>
+                <select
+                  id="remove-user-select"
+                  class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none w-full sm:w-56"
+                >
+                  <option value="">-- Select user --</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              onclick="removeUser()"
+              class="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium transition-colors"
+            >
+              Remove Selected User
+            </button>
+          </section>
+        </main>
+
+        <!-- Sticky Bottom Footer -->
+        <footer
+          class="mt-auto border-t border-slate-900 bg-slate-950/90 py-4 px-4 sm:px-8"
+        >
+          <div
+            class="max-w-3xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500"
+          >
+            <div
+              class="font-mono text-[11px] text-slate-400"
+              id="settings-footer-time"
+            >
+              ESP32 System Configuration
+            </div>
+            <div class="text-center sm:text-right text-[11px] text-slate-500">
+              ESP32 Real-time Power Monitoring Dashboard
+              <span class="mx-1 text-slate-700">|</span> Developer &copy;
+              M.Maity
+            </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div
+      class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+      id="confirm-modal"
+    >
+      <div
+        class="modal-box w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/60"
+      >
+        <div
+          id="modal-icon"
+          class="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-amber-500/10 border border-amber-500/30 text-amber-400"
+        ></div>
+        <h3 id="modal-title" class="text-base font-semibold text-white mb-1">
+          Confirm Action
+        </h3>
+        <p id="modal-desc" class="text-xs text-slate-400 mb-6 leading-relaxed">
+          Are you sure you want to proceed?
+        </p>
+        <div class="flex items-center gap-2.5">
+          <button
+            onclick="closeConfirmModal()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            id="modal-confirm-btn"
+            onclick="executeModalAction()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Daily Schedule Modal -->
+    <div
+      class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+      id="schedule-modal"
+    >
+      <div
+        class="modal-box w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl shadow-black/60"
+      >
+        <h3 class="text-sm font-semibold text-white mb-0.5">
+          Add Daily Schedule
+        </h3>
+        <p class="text-xs text-slate-400 mb-4">
+          Set recurring time and days for automatic relay control
+        </p>
+
+        <div class="space-y-4">
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Trigger Time</label
+            >
+            <input
+              type="time"
+              id="schedule-time"
+              value="08:00"
+              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-sm font-mono text-white text-center outline-none"
+            />
+          </div>
+
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Relay Action</label
+            >
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                id="action-on"
+                onclick="setScheduleAction('on')"
+                class="action-btn active py-2.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center gap-1.5 transition-all"
+              >
+                Turn ON
+              </button>
+              <button
+                type="button"
+                id="action-off"
+                onclick="setScheduleAction('off')"
+                class="action-btn off py-2.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center gap-1.5 transition-all"
+              >
+                Turn OFF
+              </button>
+            </div>
+            <input type="hidden" id="schedule-action" value="on" />
+          </div>
+
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Active Days</label
+            >
+            <div class="flex items-center justify-between gap-1">
+              <label
+                class="day-pill active w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input
+                  type="checkbox"
+                  id="day-mon"
+                  class="hidden"
+                  checked
+                />M</label
+              >
+              <label
+                class="day-pill active w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input
+                  type="checkbox"
+                  id="day-tue"
+                  class="hidden"
+                  checked
+                />T</label
+              >
+              <label
+                class="day-pill active w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input
+                  type="checkbox"
+                  id="day-wed"
+                  class="hidden"
+                  checked
+                />W</label
+              >
+              <label
+                class="day-pill active w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input
+                  type="checkbox"
+                  id="day-thu"
+                  class="hidden"
+                  checked
+                />T</label
+              >
+              <label
+                class="day-pill active w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input
+                  type="checkbox"
+                  id="day-fri"
+                  class="hidden"
+                  checked
+                />F</label
+              >
+              <label
+                class="day-pill w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input type="checkbox" id="day-sat" class="hidden" />S</label
+              >
+              <label
+                class="day-pill w-9 h-9 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-400 flex items-center justify-center cursor-pointer transition-all"
+                onclick="toggleDay(this)"
+                ><input type="checkbox" id="day-sun" class="hidden" />S</label
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5 mt-6">
+          <button
+            onclick="closeScheduleModal()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="saveSchedule()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+          >
+            Save Schedule
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Future Schedule Modal -->
+    <div
+      class="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+      id="future-schedule-modal"
+    >
+      <div
+        class="modal-box w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl shadow-black/60"
+      >
+        <h3 class="text-sm font-semibold text-white mb-0.5">
+          Add One-Time Schedule
+        </h3>
+        <p class="text-xs text-slate-400 mb-4">
+          Execute a single power action at a future date &amp; time
+        </p>
+
+        <div class="space-y-4">
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Date</label
+            >
+            <input
+              type="date"
+              id="future-date"
+              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+            />
+          </div>
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Time</label
+            >
+            <input
+              type="time"
+              id="future-time"
+              value="08:00"
+              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-sm font-mono text-white text-center outline-none"
+            />
+          </div>
+          <div>
+            <label
+              class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+              >Action</label
+            >
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                id="future-action-on"
+                onclick="setFutureScheduleAction('on')"
+                class="action-btn active py-2.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center gap-1.5 transition-all"
+              >
+                Turn ON
+              </button>
+              <button
+                type="button"
+                id="future-action-off"
+                onclick="setFutureScheduleAction('off')"
+                class="action-btn off py-2.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center gap-1.5 transition-all"
+              >
+                Turn OFF
+              </button>
+            </div>
+            <input type="hidden" id="future-action" value="on" />
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2.5 mt-6">
+          <button
+            onclick="closeFutureScheduleModal()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="saveFutureSchedule()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+          >
+            Add Schedule
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div
+      id="login-modal"
+      class="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-lg"
+    >
+      <div
+        class="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/80"
+      >
+        <div
+          class="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-blue-500/10 border border-blue-500/30 text-blue-400"
+        >
+          <svg
+            class="w-6 h-6"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <h2 class="text-base font-semibold text-white mb-1">
+          Authentication Required
+        </h2>
+        <p class="text-xs text-slate-400 mb-5">
+          Sign in to configure ESP32 Energy Monitor
+        </p>
+        <div class="space-y-2.5 mb-4">
+          <input
+            type="text"
+            id="login-username"
+            placeholder="Username"
+            autocomplete="username"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 outline-none transition-colors"
+          />
+          <input
+            type="password"
+            id="login-password"
+            placeholder="Password"
+            autocomplete="current-password"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 outline-none transition-colors"
+          />
+        </div>
+        <div id="login-error" class="text-xs text-rose-400 mb-3 hidden">
+          Invalid username or password
+        </div>
+        <button
+          onclick="verifyLogin()"
+          class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-blue-600/20"
+        >
+          Sign In
+        </button>
+        <a
+          href="index.html"
+          class="inline-block mt-4 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          &larr; Return to Dashboard
+        </a>
+      </div>
+    </div>
+
+    <!-- Admin Verification Modal -->
+    <div
+      class="modal-overlay fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+      id="admin-verify-modal"
+    >
+      <div
+        class="modal-box w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/60"
+      >
+        <div
+          class="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-amber-500/10 border border-amber-500/30 text-amber-400"
+        >
+          <svg
+            class="w-6 h-6"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <h3 class="text-base font-semibold text-white mb-1">
+          Admin Privilege Required
+        </h3>
+        <p class="text-xs text-slate-400 mb-4">
+          Enter administrator credentials to authorize this change.
+        </p>
+        <div class="space-y-2.5 text-left mb-4">
+          <input
+            type="text"
+            id="admin-verify-user"
+            placeholder="Admin username"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none"
+          />
+          <input
+            type="password"
+            id="admin-verify-pass"
+            placeholder="Admin password"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 outline-none"
+          />
+        </div>
+        <div id="admin-verify-error" class="text-xs text-rose-400 mb-3 hidden">
+          Invalid admin credentials
+        </div>
+        <div class="flex items-center gap-2.5">
+          <button
+            onclick="closeAdminVerify()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="confirmAdminVerify()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors"
+          >
+            Verify
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Toast Notification -->
+    <div
+      id="toast"
+      class="fixed bottom-5 right-5 z-[90] flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900/95 backdrop-blur-md border border-slate-800 shadow-2xl translate-y-20 opacity-0 pointer-events-none transition-all duration-300"
+    >
+      <span
+        id="toast-dot"
+        class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"
+      ></span>
+      <span class="toast-message text-xs font-medium text-slate-200"></span>
+    </div>
+
+    <script>
+      let settings = {};
+      let currentUser = null;
+      let adminVerifyCallback = null;
+      let macSuffix = "XXXX";
+
+      // Extract last 4 hex characters from MAC address if available
+      function deriveMacSuffix(macStr) {
+        if (!macStr || typeof macStr !== "string") return macSuffix;
+        const clean = macStr.replace(/[^a-fA-F0-9]/g, "").toUpperCase();
+        if (clean.length >= 4) {
+          macSuffix = clean.slice(-4);
+        }
+        return macSuffix;
+      }
+
+      function getDefaultMdnsHostname() {
+        return "energylog-" + macSuffix;
+      }
+
+      function updateMdnsUI(customHost) {
+        const defaultHost = getDefaultMdnsHostname();
+        const activeHost =
+          customHost && customHost.trim() !== ""
+            ? customHost.replace(/\.local$/i, "").trim()
+            : defaultHost;
+
+        document.getElementById("mdns-default-label").textContent =
+          defaultHost + ".local";
+        document.getElementById("mdns-default-host").textContent =
+          defaultHost + ".local";
+        document.getElementById("about-mdns").textContent =
+          activeHost + ".local";
+        document.getElementById("mdns-active-url").textContent =
+          "http://" + activeHost + ".local";
+
+        const inputEl = document.getElementById("mdns-hostname");
+        if (inputEl && !inputEl.matches(":focus")) {
+          inputEl.placeholder = defaultHost;
+          if (customHost !== undefined) {
+            inputEl.value = activeHost;
+          }
+        }
+      }
+
+      function updateMdnsPreview(val) {
+        const clean = val
+          .replace(/\.local$/i, "")
+          .replace(/[^a-zA-Z0-9-]/g, "")
+          .toLowerCase();
+        const host = clean || getDefaultMdnsHostname();
+        document.getElementById("mdns-active-url").textContent =
+          "http://" + host + ".local";
+      }
+
+      // Verify credentials using /users/list + default fallback
+      async function verifyCredentials(username, password) {
+        try {
+          var response = await fetch("/users/list");
+          var users = await response.json();
+          if (Array.isArray(users)) {
+            var user = users.find(function (u) {
+              return u.username === username && u.password === password;
+            });
+            if (user) {
+              return {
+                success: true,
+                role: user.role,
+                username: user.username,
+              };
+            }
+            return { success: false, error: "Invalid username or password" };
+          }
+        } catch (e) {}
+        if (username === "esp" && password === "456456") {
+          return { success: true, role: "admin", username: "esp" };
+        }
+        return { success: false, error: "Invalid username or password" };
+      }
+
+      // Login verification
+      function verifyLogin() {
+        var username = document.getElementById("login-username").value.trim();
+        var password = document.getElementById("login-password").value;
+        var errorEl = document.getElementById("login-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter username and password";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        verifyCredentials(username, password).then(function (d) {
+          if (d.success) {
+            currentUser = {
+              username: d.username || username,
+              role: d.role,
+            };
+            document.getElementById("login-modal").style.display = "none";
+            loadSettings();
+            loadSchedules();
+            loadFutureSchedules();
+            loadUsers();
+            fetch("/automation/timer/status")
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.active && d.remaining > 0) {
+                  timerEndTime = Date.now() + d.remaining * 1000;
+                  updateTimerDisplay();
+                  timerInterval = setInterval(updateTimerDisplay, 1000);
+                }
+              })
+              .catch(() => {});
+          } else {
+            errorEl.textContent = d.error || "Invalid username or password";
+            errorEl.classList.remove("hidden");
+          }
+        });
+      }
+
+      // Admin verification for protected actions
+      function requireAdmin(callback) {
+        if (currentUser && currentUser.role === "admin") {
+          callback();
+          return;
+        }
+        adminVerifyCallback = callback;
+        document.getElementById("admin-verify-user").value = "";
+        document.getElementById("admin-verify-pass").value = "";
+        document.getElementById("admin-verify-error").classList.add("hidden");
+        document.getElementById("admin-verify-modal").classList.add("active");
+      }
+
+      function closeAdminVerify() {
+        document
+          .getElementById("admin-verify-modal")
+          .classList.remove("active");
+        adminVerifyCallback = null;
+      }
+
+      function confirmAdminVerify() {
+        var username = document
+          .getElementById("admin-verify-user")
+          .value.trim();
+        var password = document.getElementById("admin-verify-pass").value;
+        var errorEl = document.getElementById("admin-verify-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter admin credentials";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        verifyCredentials(username, password).then(function (d) {
+          if (d.success && d.role === "admin") {
+            document
+              .getElementById("admin-verify-modal")
+              .classList.remove("active");
+            if (adminVerifyCallback) {
+              adminVerifyCallback();
+              adminVerifyCallback = null;
+            }
+          } else {
+            errorEl.textContent =
+              d.success && d.role !== "admin"
+                ? "User is not an admin"
+                : d.error || "Invalid credentials";
+            errorEl.classList.remove("hidden");
+          }
+        });
+      }
+
+      // Sidebar Navigation
+      document.querySelectorAll(".nav-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          const section = item.dataset.section;
+          document
+            .querySelectorAll(".nav-item")
+            .forEach((n) => n.classList.remove("active"));
+          item.classList.add("active");
+
+          document
+            .querySelectorAll(".settings-section")
+            .forEach((s) => s.classList.remove("active"));
+          document.getElementById("section-" + section).classList.add("active");
+
+          if (window.innerWidth < 768) toggleSidebar();
+        });
+      });
+
+      function toggleSidebar() {
+        const sb = document.getElementById("sidebar");
+        const ov = document.getElementById("sidebar-overlay");
+        sb.classList.toggle("-translate-x-full");
+        ov.classList.toggle("hidden");
+      }
+
+      function showToast(message, type = "success") {
+        const toast = document.getElementById("toast");
+        const dot = document.getElementById("toast-dot");
+        toast.querySelector(".toast-message").textContent = message;
+        dot.className =
+          type === "error"
+            ? "w-2 h-2 rounded-full bg-rose-500 shrink-0"
+            : "w-2 h-2 rounded-full bg-emerald-400 shrink-0";
+        toast.classList.remove("translate-y-20", "opacity-0");
+        setTimeout(
+          () => toast.classList.add("translate-y-20", "opacity-0"),
+          3000,
+        );
+      }
+
+      // Load settings from ESP
+      async function loadSettings() {
+        try {
+          const response = await fetch("/settings.json");
+          settings = await response.json();
+          populateSettings();
+          updateWiFiStatus();
+        } catch (error) {
+          console.error("Failed to load settings:", error);
+          updateMdnsUI();
+        }
+      }
+
+      function populateSettings() {
+        // MAC suffix & mDNS
+        if (settings.mac) deriveMacSuffix(settings.mac);
+        if (settings.macSuffix) deriveMacSuffix(settings.macSuffix);
+        setCheckbox(
+          "mdns-enabled",
+          settings.mdnsEnabled !== undefined ? settings.mdnsEnabled : true,
+        );
+        updateMdnsUI(settings.mdnsHostname || settings.mdns);
+
+        // Main Output & AFPC
+        setCheckbox("main-output", settings.mainOutput);
+        setCheckbox("kwh-saver", settings.kWhSaver);
+        setCheckbox("afpc-enabled", settings.afpcEnabled);
+        setValue("target-pf", settings.targetFactor);
+        setValue("mfd-channel", settings.mfdPerChannel);
+
+        // Node-RED
+        setCheckbox("nodered-enabled", settings.nodeRedEnabled);
+        if (settings.nodeRedIP) {
+          const parts = settings.nodeRedIP.split(":");
+          setValue("nodered-ip", parts[0]);
+          setValue("nodered-port", parts[1] || "1880");
+        }
+
+        // Thresholds
+        setValue("volt-high", settings.voltHigh);
+        setValue("volt-low", settings.voltLow);
+        setValue("power-high", settings.powerHigh);
+        setValue("power-low", settings.powerLow);
+        setValue("freq-high", settings.freqHigh);
+        setValue("freq-low", settings.freqLow);
+        setValue("max-kwh", settings.maxkWh);
+        setValue("afpc-low", settings.afpcLowWatt);
+        setValue("afpc-high", settings.afpcHighWatt);
+
+        // Alerts
+        setCheckbox("alert-volt-high", settings.highVoltageAlert);
+        setCheckbox("alert-volt-low", settings.lowVoltageAlert);
+        setCheckbox("alert-power-high", settings.highPowerAlert);
+        setCheckbox("alert-power-low", settings.lowPowerAlert);
+        setCheckbox("alert-freq-low", settings.lowFreqAlert);
+        setCheckbox("alert-freq-high", settings.highFreqAlert);
+
+        // Protection
+        setCheckbox("prot-volt-high", settings.highVProtec);
+        setCheckbox("prot-volt-low", settings.LowVProtec);
+        setCheckbox("prot-power-high", settings.highPProtec);
+        setCheckbox("prot-freq-high", settings.highHzProtec);
+        setCheckbox("prot-freq-low", settings.lowHzProtec);
+
+        // Intervals
+        setValue("interval-esp", settings.espShareInterval);
+        setValue("interval-nodered", settings.nodeRedInterval);
+        setValue("interval-pzem", settings.pzemInterval);
+        setValue("interval-alert", settings.alertInterval);
+        setValue("interval-protection", settings.protectionDelay);
+
+        // Startup
+        setValue("startup-delay", settings.startupTime);
+
+        if (settings.gmtOffset !== undefined)
+          setValue("timezone-select", settings.gmtOffset);
+      }
+
+      function setCheckbox(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!value;
+      }
+
+      function setValue(id, value) {
+        const el = document.getElementById(id);
+        if (el && value !== undefined) el.value = value;
+      }
+
+      async function updateWiFiStatus() {
+        try {
+          const response = await fetch("/wifi-status.json");
+          const data = await response.json();
+
+          if (data.mac) {
+            deriveMacSuffix(data.mac);
+            updateMdnsUI(settings.mdnsHostname || settings.mdns);
+          }
+
+          const badge = document.getElementById("wifi-status-badge");
+          const statusText = document.getElementById("wifi-status-text");
+
+          if (data.connected) {
+            badge.className =
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30";
+            statusText.textContent = "Connected";
+            document.getElementById("wifi-ssid").textContent =
+              data.ssid || "---";
+            document.getElementById("wifi-ip").textContent = data.ip || "---";
+            document.getElementById("wifi-rssi").textContent = data.rssi
+              ? data.rssi + " dBm"
+              : "---";
+          } else {
+            badge.className =
+              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30";
+            statusText.textContent = "Disconnected";
+            document.getElementById("wifi-ssid").textContent = "Not connected";
+            document.getElementById("wifi-ip").textContent = "---";
+            document.getElementById("wifi-rssi").textContent = "---";
+          }
+        } catch (error) {
+          console.error("Failed to get WiFi status");
+        }
+      }
+
+      // Protected setting keys (require admin verification)
+      var protectedSettingKeys = new Set([
+        "mainOutput",
+        "kWhSaver",
+        "afpcEnabled",
+        "targetFactor",
+        "mfdPerChannel",
+        "mdnsEnabled",
+      ]);
+
+      function saveSetting(key, value) {
+        if (protectedSettingKeys.has(key)) {
+          requireAdmin(function () {
+            _doSaveSetting(key, value);
+          });
+          return;
+        }
+        _doSaveSetting(key, value);
+      }
+
+      async function _doSaveSetting(key, value) {
+        try {
+          const response = await fetch("/setting/set", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key, value }),
+          });
+          const result = await response.json();
+          if (result.success) {
+            showToast("Setting updated");
+          } else {
+            showToast("Failed to save", "error");
+          }
+        } catch (error) {
+          showToast("Connection error", "error");
+        }
+      }
+
+      // mDNS Functions
+      function saveMdnsSettings() {
+        const enabled = document.getElementById("mdns-enabled").checked;
+        let rawHost = document.getElementById("mdns-hostname").value.trim();
+        rawHost = rawHost
+          .replace(/\.local$/i, "")
+          .replace(/[^a-zA-Z0-9-]/g, "")
+          .toLowerCase();
+
+        if (!rawHost) {
+          showToast("Please enter a valid mDNS hostname", "error");
+          return;
+        }
+
+        fetch("/mdns/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: enabled, hostname: rawHost }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              settings.mdnsHostname = rawHost;
+              updateMdnsUI(rawHost);
+              showToast("mDNS updated to " + rawHost + ".local");
+            } else {
+              showToast(d.error || "Failed to save mDNS", "error");
+            }
+          })
+          .catch(() => {
+            // Fallback to generic setting endpoint if /mdns/save is handled via /setting/set
+            _doSaveSetting("mdnsHostname", rawHost);
+            updateMdnsUI(rawHost);
+          });
+      }
+
+      function resetMdnsDefault() {
+        const defaultHost = getDefaultMdnsHostname();
+        document.getElementById("mdns-hostname").value = defaultHost;
+        document.getElementById("mdns-enabled").checked = true;
+        updateMdnsUI(defaultHost);
+
+        fetch("/mdns/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hostname: defaultHost, enabled: true }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            showToast(
+              d.success ? "Reset to " + defaultHost + ".local" : "Failed",
+              d.success ? "success" : "error",
+            );
+          })
+          .catch(() => {
+            _doSaveSetting("mdnsHostname", defaultHost);
+            showToast("Reset to " + defaultHost + ".local");
+          });
+      }
+
+      function deleteMdns() {
+        fetch("/mdns/delete", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            document.getElementById("mdns-hostname").value = "";
+            document.getElementById("mdns-enabled").checked = false;
+            settings.mdnsHostname = "";
+            updateMdnsUI("");
+            showToast(
+              d.success ? "Custom mDNS deleted" : "Deleted custom mDNS",
+            );
+          })
+          .catch(() => {
+            document.getElementById("mdns-hostname").value = "";
+            document.getElementById("mdns-enabled").checked = false;
+            _doSaveSetting("mdnsHostname", "");
+            updateMdnsUI("");
+          });
+      }
+
+      // WiFi functions
+      function connectWiFi() {
+        showConfirmModal(
+          "info",
+          "Start WiFi Portal?",
+          'The device will create an access point named "ESP.EnergyLog". Connect to it to configure WiFi.',
+          () => {
+            fetch("/wifi/connect", { method: "POST" })
+              .then(() => showToast("WiFi portal started"))
+              .catch(() => showToast("Failed", "error"));
+          },
+        );
+      }
+
+      function disconnectWiFi() {
+        showConfirmModal(
+          "warning",
+          "Disconnect WiFi?",
+          "Disconnect from the current wireless network?",
+          () => {
+            fetch("/wifi/disconnect", { method: "POST" })
+              .then(() => {
+                showToast("Disconnected");
+                updateWiFiStatus();
+              })
+              .catch(() => showToast("Failed", "error"));
+          },
+        );
+      }
+
+      function forgetWiFi() {
+        showConfirmModal(
+          "danger",
+          "Forget WiFi Network?",
+          "This will remove saved WiFi credentials and restart the device.",
+          () => {
+            fetch("/wifi/forget", { method: "POST" })
+              .then(() => showToast("WiFi credentials cleared. Restarting..."))
+              .catch(() => showToast("Failed", "error"));
+          },
+        );
+      }
+
+      // Node-RED functions
+      function saveNodeRedSettings() {
+        const ip = document.getElementById("nodered-ip").value.trim();
+        const port =
+          document.getElementById("nodered-port").value.trim() || "1880";
+        const fullAddress = ip + ":" + port;
+
+        fetch("/nodered/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: fullAddress }),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Node-RED settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function testNodeRed() {
+        document.getElementById("nodered-status").textContent = "Testing...";
+        fetch("/nodered/test")
+          .then((r) => r.json())
+          .then((d) => {
+            document.getElementById("nodered-status").textContent = d.connected
+              ? "Connected"
+              : "Unreachable";
+            showToast(
+              d.connected ? "Connection OK" : "Connection failed",
+              d.connected ? "success" : "error",
+            );
+          })
+          .catch(() => {
+            document.getElementById("nodered-status").textContent = "Error";
+            showToast("Test failed", "error");
+          });
+      }
+
+      // Confirmation Modal System
+      let pendingAction = null;
+
+      function showConfirmModal(
+        typeOrAction,
+        title,
+        description,
+        actionOrType,
+      ) {
+        var type, action;
+        var knownTypes = ["danger", "warning", "info", "success"];
+        if (knownTypes.indexOf(typeOrAction) !== -1) {
+          type = typeOrAction;
+          action = actionOrType;
+        } else {
+          type = typeof actionOrType === "string" ? actionOrType : "warning";
+          action = typeOrAction;
+        }
+        pendingAction = action;
+        const modal = document.getElementById("confirm-modal");
+        const modalIcon = document.getElementById("modal-icon");
+        const modalTitle = document.getElementById("modal-title");
+        const modalDesc = document.getElementById("modal-desc");
+        const confirmBtn = document.getElementById("modal-confirm-btn");
+
+        modalTitle.textContent = title;
+        modalDesc.textContent = description;
+
+        if (type === "danger") {
+          modalIcon.className =
+            "w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-rose-500/10 border border-rose-500/30 text-rose-400";
+          modalIcon.innerHTML =
+            '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+          confirmBtn.className =
+            "flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors";
+          confirmBtn.textContent = "Confirm";
+        } else if (type === "warning") {
+          modalIcon.className =
+            "w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-amber-500/10 border border-amber-500/30 text-amber-400";
+          modalIcon.innerHTML =
+            '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+          confirmBtn.className =
+            "flex-1 py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors";
+          confirmBtn.textContent = "Confirm";
+        } else {
+          modalIcon.className =
+            "w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-blue-500/10 border border-blue-500/30 text-blue-400";
+          modalIcon.innerHTML =
+            '<svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+          confirmBtn.className =
+            "flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors";
+          confirmBtn.textContent = "Proceed";
+        }
+
+        modal.classList.add("active");
+      }
+
+      function closeConfirmModal() {
+        document.getElementById("confirm-modal").classList.remove("active");
+        pendingAction = null;
+      }
+
+      function executeModalAction() {
+        const actionToRun = pendingAction;
+        closeConfirmModal();
+        if (typeof actionToRun === "function") {
+          actionToRun();
+        } else if (
+          typeof actionToRun === "string" &&
+          typeof window[actionToRun] === "function"
+        ) {
+          window[actionToRun]();
+        }
+      }
+
+      // Data & System functions
+      function clearEnergy() {
+        fetch("/data/clear-kwh", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              showToast("Energy counter cleared & timestamp saved");
+            } else {
+              showToast(d.error || "NTP not synced! Reset blocked.", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function clearDays() {
+        fetch("/data/clear-days", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              showToast("Last billing counter reset");
+            } else {
+              showToast(d.error || "NTP not synced! Reset blocked.", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function factoryResetData() {
+        fetch("/factory/reset-data", { method: "POST" })
+          .then(() => showToast("Data reset complete"))
+          .catch(() => showToast("Failed", "error"));
+      }
+
+      function factoryResetSettings() {
+        fetch("/factory/reset-settings", { method: "POST" })
+          .then(() => showToast("Settings restored. Restarting..."))
+          .catch(() => showToast("Failed", "error"));
+      }
+
+      function syncTime() {
+        fetch("/time/sync", { method: "POST" })
+          .then(() => showToast("Time synchronized"))
+          .catch(() => showToast("Failed", "error"));
+      }
+
+      function restartDevice() {
+        fetch("/restart", { method: "POST" })
+          .then(() => showToast("Device restarting..."))
+          .catch(() => showToast("Failed", "error"));
+      }
+
+      // Section Save Functions
+      function saveOutputSettings() {
+        const data = {
+          mainOutput: document.getElementById("main-output").checked,
+          kWhSaver: document.getElementById("kwh-saver").checked,
+        };
+        fetch("/output/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Output settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveAfpcSettings() {
+        const data = {
+          afpcEnabled: document.getElementById("afpc-enabled").checked,
+          targetFactor: parseFloat(document.getElementById("target-pf").value),
+          mfdPerChannel: parseFloat(
+            document.getElementById("mfd-channel").value,
+          ),
+        };
+        fetch("/afpc/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "AFPC settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveAlertSettings() {
+        const data = {
+          highVoltageAlert: document.getElementById("alert-volt-high").checked,
+          lowVoltageAlert: document.getElementById("alert-volt-low").checked,
+          highPowerAlert: document.getElementById("alert-power-high").checked,
+          lowPowerAlert: document.getElementById("alert-power-low").checked,
+          lowFreqAlert: document.getElementById("alert-freq-low").checked,
+          highFreqAlert: document.getElementById("alert-freq-high").checked,
+        };
+        fetch("/alerts/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Alert settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveProtectionSettings() {
+        const data = {
+          highVProtec: document.getElementById("prot-volt-high").checked,
+          LowVProtec: document.getElementById("prot-volt-low").checked,
+          highPProtec: document.getElementById("prot-power-high").checked,
+          highHzProtec: document.getElementById("prot-freq-high").checked,
+          lowHzProtec: document.getElementById("prot-freq-low").checked,
+        };
+        fetch("/protection/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Protection settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveIntervalSettings() {
+        const data = {
+          espShareInterval: parseInt(
+            document.getElementById("interval-esp").value,
+          ),
+          nodeRedInterval: parseInt(
+            document.getElementById("interval-nodered").value,
+          ),
+          pzemInterval: parseInt(
+            document.getElementById("interval-pzem").value,
+          ),
+          alertInterval: parseInt(
+            document.getElementById("interval-alert").value,
+          ),
+          protectionDelay: parseInt(
+            document.getElementById("interval-protection").value,
+          ),
+        };
+        fetch("/intervals/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Interval settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveStartupSettings() {
+        const data = {
+          startupTime: parseInt(document.getElementById("startup-delay").value),
+        };
+        fetch("/startup/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Startup settings saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveThresholdSettings() {
+        const data = {
+          voltHigh: parseInt(document.getElementById("volt-high").value),
+          voltLow: parseInt(document.getElementById("volt-low").value),
+          powerHigh: parseInt(document.getElementById("power-high").value),
+          powerLow: parseInt(document.getElementById("power-low").value),
+          maxkWh: parseInt(document.getElementById("max-kwh").value),
+          freqHigh: parseFloat(document.getElementById("freq-high").value),
+          freqLow: parseFloat(document.getElementById("freq-low").value),
+          afpcLowWatt: parseInt(document.getElementById("afpc-low").value),
+          afpcHighWatt: parseInt(document.getElementById("afpc-high").value),
+        };
+        fetch("/thresholds/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Thresholds saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function saveTimezone() {
+        const offset = parseInt(
+          document.getElementById("timezone-select").value,
+        );
+        fetch("/time/timezone", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset: offset }),
+        })
+          .then((r) => r.json())
+          .then((d) =>
+            showToast(
+              d.success ? "Timezone saved" : "Failed",
+              d.success ? "success" : "error",
+            ),
+          )
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      // Timer functions
+      let timerInterval = null;
+      let timerEndTime = null;
+
+      function startTimer() {
+        const hours =
+          parseInt(document.getElementById("timer-hours").value) || 0;
+        const minutes =
+          parseInt(document.getElementById("timer-minutes").value) || 0;
+        const totalSeconds = (hours * 60 + minutes) * 60;
+
+        if (totalSeconds <= 0) {
+          showToast("Please set a valid duration", "error");
+          return;
+        }
+
+        fetch("/automation/timer/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ duration: totalSeconds }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              timerEndTime = Date.now() + totalSeconds * 1000;
+              updateTimerDisplay();
+              if (timerInterval) clearInterval(timerInterval);
+              timerInterval = setInterval(updateTimerDisplay, 1000);
+              showToast("Countdown timer started");
+            } else {
+              showToast("Failed to start timer", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function cancelTimer() {
+        fetch("/automation/timer/cancel", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+              timerEndTime = null;
+              document.getElementById("timer-status").textContent =
+                "Not active";
+              showToast("Timer cancelled");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function updateTimerDisplay() {
+        if (!timerEndTime) return;
+        const remaining = Math.max(
+          0,
+          Math.floor((timerEndTime - Date.now()) / 1000),
+        );
+        if (remaining <= 0) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+          document.getElementById("timer-status").textContent = "Completed";
+          return;
+        }
+        const h = Math.floor(remaining / 3600);
+        const m = Math.floor((remaining % 3600) / 60);
+        const s = remaining % 60;
+        document.getElementById("timer-status").textContent =
+          `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")} remaining`;
+      }
+
+      // Schedule Modal functions
+      function showAddScheduleModal() {
+        document.getElementById("schedule-modal").classList.add("active");
+      }
+
+      function closeScheduleModal() {
+        document.getElementById("schedule-modal").classList.remove("active");
+      }
+
+      function toggleDay(pill) {
+        const checkbox = pill.querySelector('input[type="checkbox"]');
+        checkbox.checked = !checkbox.checked;
+        pill.classList.toggle("active", checkbox.checked);
+      }
+
+      function setScheduleAction(action) {
+        document.getElementById("schedule-action").value = action;
+        document
+          .getElementById("action-on")
+          .classList.toggle("active", action === "on");
+        document
+          .getElementById("action-off")
+          .classList.toggle("active", action === "off");
+      }
+
+      function setFutureScheduleAction(action) {
+        document.getElementById("future-action").value = action;
+        document
+          .getElementById("future-action-on")
+          .classList.toggle("active", action === "on");
+        document
+          .getElementById("future-action-off")
+          .classList.toggle("active", action === "off");
+      }
+
+      function saveSchedule() {
+        const time = document.getElementById("schedule-time").value;
+        const action = document.getElementById("schedule-action").value;
+        const days = [];
+        ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].forEach((d, i) => {
+          if (document.getElementById("day-" + d).checked) days.push(i);
+        });
+
+        if (days.length === 0) {
+          showToast("Select at least one day", "error");
+          return;
+        }
+
+        fetch("/automation/schedule/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ time, action, days }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              closeScheduleModal();
+              loadSchedules();
+              showToast("Schedule added");
+            } else {
+              showToast(d.error || "Failed", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function loadSchedules() {
+        fetch("/automation/schedule/list")
+          .then((r) => r.json())
+          .then((schedules) => {
+            const list = document.getElementById("schedule-list");
+            if (!schedules || schedules.length === 0) {
+              list.innerHTML =
+                '<div class="py-3 text-xs text-slate-500">No schedules configured</div>';
+              return;
+            }
+            list.innerHTML = schedules
+              .map(
+                (s, i) => `
+              <div class="py-3 flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-xs font-mono font-semibold text-slate-200">${s.time} &mdash; <span class="${s.action === "on" ? "text-emerald-400" : "text-rose-400"}">${s.action.toUpperCase()}</span></div>
+                  <div class="text-[11px] text-slate-500">${formatDays(s.days)}</div>
+                </div>
+                <button onclick="deleteSchedule(${i})" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors">
+                  Delete
+                </button>
+              </div>
+            `,
+              )
+              .join("");
+          })
+          .catch(() => {});
+      }
+
+      function deleteSchedule(index) {
+        showConfirmModal(
+          "danger",
+          "Delete Schedule",
+          "Are you sure you want to delete this schedule?",
+          () => {
+            fetch("/automation/schedule/delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ index }),
+            })
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.success) {
+                  loadSchedules();
+                  showToast("Schedule deleted");
+                }
+              })
+              .catch(() => showToast("Connection error", "error"));
+          },
+        );
+      }
+
+      function formatDays(days) {
+        const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        return days.map((d) => names[d]).join(", ");
+      }
+
+      function showAddFutureScheduleModal() {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById("future-date").value = now
+          .toISOString()
+          .split("T")[0];
+        document
+          .getElementById("future-schedule-modal")
+          .classList.add("active");
+      }
+
+      function closeFutureScheduleModal() {
+        document
+          .getElementById("future-schedule-modal")
+          .classList.remove("active");
+      }
+
+      function saveFutureSchedule() {
+        const date = document.getElementById("future-date").value;
+        const time = document.getElementById("future-time").value;
+        const action = document.getElementById("future-action").value;
+
+        if (!date || !time) {
+          showToast("Please fill all fields", "error");
+          return;
+        }
+
+        fetch("/automation/future/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date, time, action }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              closeFutureScheduleModal();
+              loadFutureSchedules();
+              showToast("Future schedule added");
+            } else {
+              showToast(d.error || "Failed", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function loadFutureSchedules() {
+        fetch("/automation/future/list")
+          .then((r) => r.json())
+          .then((schedules) => {
+            const list = document.getElementById("future-schedule-list");
+            if (!schedules || schedules.length === 0) {
+              list.innerHTML =
+                '<div class="py-3 text-xs text-slate-500">No future schedules configured</div>';
+              return;
+            }
+            list.innerHTML = schedules
+              .map(
+                (s, i) => `
+              <div class="py-3 flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-xs font-mono font-semibold text-slate-200">${s.date} ${s.time} &mdash; <span class="${s.action === "on" ? "text-emerald-400" : "text-rose-400"}">${s.action.toUpperCase()}</span></div>
+                  <div class="text-[11px] text-slate-500">One-time execution</div>
+                </div>
+                <button onclick="deleteFutureSchedule(${i})" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors">
+                  Delete
+                </button>
+              </div>
+            `,
+              )
+              .join("");
+          })
+          .catch(() => {});
+      }
+
+      function deleteFutureSchedule(index) {
+        showConfirmModal(
+          "danger",
+          "Delete Schedule",
+          "Are you sure you want to delete this future schedule?",
+          () => {
+            fetch("/automation/future/delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ index }),
+            })
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.success) {
+                  loadFutureSchedules();
+                  showToast("Future schedule deleted");
+                }
+              })
+              .catch(() => showToast("Connection error", "error"));
+          },
+        );
+      }
+
+      // User Management functions
+      function loadUsers() {
+        fetch("/users/list")
+          .then((r) => r.json())
+          .then((users) => {
+            const list = document.getElementById("user-list");
+            const removeSelect = document.getElementById("remove-user-select");
+
+            if (!users || users.length === 0) {
+              list.innerHTML = `
+                <div class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800/80">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-xs font-semibold text-blue-400">E</div>
+                    <div>
+                      <div class="text-xs font-semibold text-slate-200">esp</div>
+                      <div class="text-[11px] text-slate-500">Administrator (default)</div>
+                    </div>
+                  </div>
+                </div>`;
+              if (removeSelect) {
+                removeSelect.innerHTML =
+                  '<option value="">-- No users --</option>';
+              }
+              return;
+            }
+
+            list.innerHTML = users
+              .map(
+                (u) => `
+              <div class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800/80">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-xs font-semibold text-blue-400">
+                    ${u.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div class="text-xs font-semibold text-slate-200">${u.username}</div>
+                    <div class="text-[11px] text-slate-500">${u.role === "admin" ? "Administrator" : "Standard User"}${u.username === "esp" ? " (default)" : ""}</div>
+                  </div>
+                </div>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-mono uppercase ${u.role === "admin" ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" : "bg-slate-800 text-slate-400"}">${u.role}</span>
+              </div>
+            `,
+              )
+              .join("");
+
+            if (removeSelect) {
+              removeSelect.innerHTML =
+                '<option value="">-- Select user --</option>' +
+                users
+                  .map(
+                    (u) =>
+                      `<option value="${u.username}">${u.username} (${u.role})</option>`,
+                  )
+                  .join("");
+            }
+          })
+          .catch(() => {});
+      }
+
+      function addUser() {
+        const adminUser = document
+          .getElementById("add-admin-user")
+          .value.trim();
+        const adminPass = document.getElementById("add-admin-pass").value;
+        const username = document.getElementById("new-username").value.trim();
+        const password = document.getElementById("new-password").value;
+        const role = document.getElementById("new-role").value;
+
+        if (!adminUser || !adminPass) {
+          showToast("Enter admin credentials to verify", "error");
+          return;
+        }
+        if (!username || !password) {
+          showToast("Please fill all new user fields", "error");
+          return;
+        }
+        if (username.length < 3) {
+          showToast("Username must be at least 3 characters", "error");
+          return;
+        }
+        if (password.length < 4) {
+          showToast("Password must be at least 4 characters", "error");
+          return;
+        }
+
+        fetch("/users/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            adminUser,
+            adminPass,
+            username,
+            password,
+            role,
+          }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              showToast("User added successfully");
+              document.getElementById("new-username").value = "";
+              document.getElementById("new-password").value = "";
+              document.getElementById("new-role").value = "user";
+              loadUsers();
+            } else {
+              showToast(d.error || "Failed to add user", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function removeUser() {
+        const adminUser = document.getElementById("rm-admin-user").value.trim();
+        const adminPass = document.getElementById("rm-admin-pass").value;
+        const username = document.getElementById("remove-user-select").value;
+
+        if (!adminUser || !adminPass) {
+          showToast("Enter admin credentials to verify", "error");
+          return;
+        }
+        if (!username) {
+          showToast("Select a user to remove", "error");
+          return;
+        }
+
+        showConfirmModal(
+          "danger",
+          "Remove User",
+          'Are you sure you want to remove user "' +
+            username +
+            '"? At least one admin must remain.',
+          () => {
+            fetch("/users/delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ adminUser, adminPass, username }),
+            })
+              .then((r) => r.json())
+              .then((d) => {
+                if (d.success) {
+                  loadUsers();
+                  showToast("User removed");
+                  document.getElementById("remove-user-select").value = "";
+                } else {
+                  showToast(d.error || "Failed to remove user", "error");
+                }
+              })
+              .catch(() => showToast("Connection error", "error"));
+          },
+        );
+      }
+
+      // Initialize
+      document.addEventListener("DOMContentLoaded", () => {
+        updateMdnsUI();
+        document
+          .getElementById("login-password")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") verifyLogin();
+          });
+        document
+          .getElementById("login-username")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter")
+              document.getElementById("login-password").focus();
+          });
+        document
+          .getElementById("admin-verify-pass")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") confirmAdminVerify();
+          });
+      });
+
+      // Protect functions requiring admin verification
+      (function () {
+        var protectedFns = [
+          "saveMdnsSettings",
+          "resetMdnsDefault",
+          "deleteMdns",
+          "saveOutputSettings",
+          "saveAfpcSettings",
+          "clearEnergy",
+          "clearDays",
+          "factoryResetData",
+          "factoryResetSettings",
+          "restartDevice",
+          "startTimer",
+          "cancelTimer",
+          "saveSchedule",
+          "saveFutureSchedule",
+          "deleteSchedule",
+          "deleteFutureSchedule",
+        ];
+        protectedFns.forEach(function (name) {
+          var original = window[name];
+          if (typeof original === "function") {
+            window[name] = function () {
+              var args = arguments;
+              var self = this;
+              requireAdmin(function () {
+                original.apply(self, args);
+              });
+            };
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

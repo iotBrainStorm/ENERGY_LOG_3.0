@@ -1,0 +1,1545 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Energy Monitor — Real-time Telemetry</title>
+    <link rel="icon" type="image/svg+xml" href="plug_icon.svg" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: [
+                "Inter",
+                "-apple-system",
+                "BlinkMacSystemFont",
+                "sans-serif",
+              ],
+              mono: [
+                "JetBrains Mono",
+                "ui-monospace",
+                "SFMono-Regular",
+                "monospace",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Custom Modal Visibility States */
+      .modal-backdrop {
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          opacity 0.2s ease,
+          visibility 0.2s ease;
+      }
+      .modal-backdrop.show {
+        opacity: 1;
+        visibility: visible;
+      }
+      .modal-backdrop .modal-panel {
+        transform: scale(0.96) translateY(8px);
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .modal-backdrop.show .modal-panel {
+        transform: scale(1) translateY(0);
+      }
+
+      /* Power Button Active State */
+      #power-toggle.active {
+        border-color: rgba(16, 185, 129, 0.45);
+        background-color: rgba(16, 185, 129, 0.12);
+        color: #10b981;
+        box-shadow: 0 0 18px -4px rgba(16, 185, 129, 0.35);
+      }
+
+      /* Time Range Button Active State */
+      .time-btn.active {
+        background-color: #2563eb;
+        color: #ffffff;
+        border-color: #3b82f6;
+      }
+
+      /* Number Input Spinners Hidden */
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type="number"] {
+        -moz-appearance: textfield;
+      }
+    </style>
+  </head>
+
+  <body
+    class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col selection:bg-blue-500/30 selection:text-blue-200 antialiased"
+  >
+    <!-- Main Wrapper -->
+    <div
+      class="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 pb-8 flex-1 flex flex-col"
+    >
+      <!-- Top Header -->
+      <header class="mb-6">
+        <div
+          class="bg-slate-900/90 backdrop-blur-md border border-slate-800/90 rounded-2xl px-4 py-3.5 sm:px-6 sm:py-4 flex items-center justify-between gap-3 shadow-lg shadow-black/20"
+        >
+          <!-- Brand -->
+          <div class="flex items-center gap-3 min-w-0">
+            <div
+              class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0"
+            >
+              <svg
+                class="w-5 h-5 text-white"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+            <div class="truncate">
+              <div class="flex items-center gap-2.5">
+                <h1
+                  class="text-base sm:text-lg font-semibold tracking-tight text-white truncate"
+                >
+                  Energy Monitor
+                </h1>
+                <span
+                  class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-800 text-slate-400 border border-slate-700/70"
+                >
+                  ESP32
+                </span>
+              </div>
+              <p class="text-xs text-slate-400 truncate">
+                Real-time Power &amp; Telemetry Analytics
+              </p>
+            </div>
+          </div>
+
+          <!-- Right Controls -->
+          <div class="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <!-- Status Pill -->
+            <div
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-slate-950/90 border border-slate-800"
+              title="Device Connection Status"
+            >
+              <span
+                id="esp-status-dot"
+                class="w-2 h-2 rounded-full bg-rose-500 transition-all duration-300"
+              ></span>
+              <span
+                id="esp-status-text"
+                class="text-[11px] font-medium text-slate-400 hidden xs:inline sm:inline"
+                >Offline</span
+              >
+            </div>
+
+            <!-- Main Power Relay Toggle Button -->
+            <button
+              id="power-toggle"
+              onclick="showPowerConfirm()"
+              title="Main Output Relay"
+              class="w-10 h-10 rounded-xl border border-slate-800 bg-slate-950/80 text-slate-400 hover:border-emerald-500/50 hover:text-emerald-400 hover:bg-emerald-500/10 flex items-center justify-center transition-all duration-200 active:scale-95"
+            >
+              <svg
+                class="w-[18px] h-[18px]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
+            </button>
+
+            <!-- Settings Button -->
+            <button
+              onclick="window.location.href = 'config.html'"
+              title="System Settings"
+              class="w-10 h-10 rounded-xl border border-slate-800 bg-slate-950/80 text-slate-400 hover:border-slate-700 hover:text-slate-100 hover:bg-slate-800/70 flex items-center justify-center transition-all duration-200 active:scale-95"
+            >
+              <svg
+                class="w-[18px] h-[18px]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+                />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Telemetry Cards Grid -->
+      <main
+        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4"
+      >
+        <!-- 1. Voltage Card (Interactive Graph) -->
+        <div
+          onclick="openDetailView('voltage', 'Voltage', 'V')"
+          class="group relative bg-slate-900/80 hover:bg-slate-900 border border-slate-800/90 hover:border-amber-500/40 rounded-2xl p-4 sm:p-5 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Voltage</span
+              >
+            </div>
+            <span
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/90 text-slate-400 group-hover:bg-amber-500/15 group-hover:text-amber-300 transition-colors"
+            >
+              <svg
+                class="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              Graph
+            </span>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="voltage"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-amber-400 tabular-nums"
+              >0.0</span
+            >
+            <span class="text-xs font-medium text-slate-500">V</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="voltage-fill h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 2. Current Card (Interactive Graph) -->
+        <div
+          onclick="openDetailView('current', 'Current', 'A')"
+          class="group relative bg-slate-900/80 hover:bg-slate-900 border border-slate-800/90 hover:border-cyan-500/40 rounded-2xl p-4 sm:p-5 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M2 12h4l3-9 6 18 3-9h4" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Current</span
+              >
+            </div>
+            <span
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/90 text-slate-400 group-hover:bg-cyan-500/15 group-hover:text-cyan-300 transition-colors"
+            >
+              <svg
+                class="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              Graph
+            </span>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="current"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-cyan-400 tabular-nums"
+              >0.00</span
+            >
+            <span class="text-xs font-medium text-slate-500">A</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="current-fill h-full bg-gradient-to-r from-cyan-500 to-sky-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 3. Active Power Card (Interactive Graph) -->
+        <div
+          onclick="openDetailView('power', 'Power', 'W')"
+          class="group relative bg-slate-900/80 hover:bg-slate-900 border border-slate-800/90 hover:border-rose-500/40 rounded-2xl p-4 sm:p-5 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 2v10" />
+                  <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Power</span
+              >
+            </div>
+            <span
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-800/90 text-slate-400 group-hover:bg-rose-500/15 group-hover:text-rose-300 transition-colors"
+            >
+              <svg
+                class="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              Graph
+            </span>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="power"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-rose-400 tabular-nums"
+              >0.0</span
+            >
+            <span class="text-xs font-medium text-slate-500">W</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="power-fill h-full bg-gradient-to-r from-rose-500 to-red-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 4. Energy Card -->
+        <div
+          class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 sm:p-5 transition-all duration-200 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="2" y="7" width="16" height="10" rx="2" ry="2" />
+                  <line x1="22" y1="11" x2="22" y2="13" />
+                  <line x1="6" y1="11" x2="6" y2="13" />
+                  <line x1="10" y1="11" x2="10" y2="13" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Energy</span
+              >
+            </div>
+            <!-- ADD: Reset Date & Time Badge at Right Side -->
+            <span
+              id="energy-reset-time"
+              title="Last Energy Reset Time"
+              class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-800/90 text-emerald-400 border border-slate-700/70"
+            >
+              Not Reset
+            </span>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="energy"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-emerald-400 tabular-nums"
+              >0.00</span
+            >
+            <span class="text-xs font-medium text-slate-500">kWh</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="energy-fill h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 5. Power Factor Card -->
+        <div
+          class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 sm:p-5 transition-all duration-200 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 12l4-3" />
+                  <circle cx="12" cy="12" r="1" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Power Factor</span
+              >
+            </div>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="pf"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-violet-400 tabular-nums"
+              >0.00</span
+            >
+            <span class="text-xs font-medium text-slate-500">PF</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="pf-fill h-full bg-gradient-to-r from-violet-500 to-purple-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 6. Frequency Card -->
+        <div
+          class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 sm:p-5 transition-all duration-200 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M2 12c2.5-5 5-5 7.5 0s5 5 7.5 0 5-5 5 0" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Frequency</span
+              >
+            </div>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="frequency"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-pink-400 tabular-nums"
+              >0.00</span
+            >
+            <span class="text-xs font-medium text-slate-500">Hz</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="frequency-fill h-full bg-gradient-to-r from-pink-500 to-rose-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 7. Runtime Card -->
+        <div
+          class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 sm:p-5 transition-all duration-200 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-lime-500/10 border border-lime-500/20 flex items-center justify-center text-lime-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Last Billing</span
+              >
+            </div>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="totalDays"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-lime-400 tabular-nums"
+              >0.0</span
+            >
+            <span class="text-xs font-medium text-slate-500">Days</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="days-fill h-full bg-gradient-to-r from-lime-500 to-green-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 8. Session Uptime Card -->
+        <div
+          class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-4 sm:p-5 transition-all duration-200 shadow-sm"
+        >
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400"
+              >
+                <svg
+                  class="w-4 h-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+              </div>
+              <span
+                class="text-xs font-medium uppercase tracking-wider text-slate-400"
+                >Session Uptime</span
+              >
+            </div>
+          </div>
+          <div class="flex items-baseline gap-1.5 mb-3.5">
+            <span
+              id="uptime"
+              class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-orange-400 tabular-nums"
+              >0.0</span
+            >
+            <span class="text-xs font-medium text-slate-500">Hrs</span>
+          </div>
+          <div class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              class="uptime-fill h-full bg-gradient-to-r from-orange-500 to-amber-400 rounded-full transition-all duration-500"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Sticky Bottom Footer -->
+    <footer class="mt-auto border-t border-slate-900 bg-slate-950/90 py-4 px-4">
+      <div
+        class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500"
+      >
+        <div class="flex items-center gap-2 font-mono text-slate-400">
+          <svg
+            class="w-3.5 h-3.5 text-blue-400 shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span id="dateTime">-- --- ----, --:--:--</span>
+          <span id="footer-datetime" class="hidden"></span>
+        </div>
+        <div class="text-center sm:text-right text-[11px] text-slate-500">
+          ESP32 Real-time Power Monitoring Dashboard
+          <span class="mx-1 text-slate-700">|</span> Developer &copy; M.Maity
+        </div>
+      </div>
+    </footer>
+
+    <!-- Compact Graph Detail Modal (Thin Text, Thin Line, Reduced Padding) -->
+    <div
+      id="detail-modal"
+      class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-md"
+    >
+      <div
+        class="modal-panel w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4 shadow-2xl shadow-black/60"
+      >
+        <!-- Compact Header -->
+        <div
+          class="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-800/80"
+        >
+          <div class="flex items-center gap-2">
+            <span
+              id="detail-dot"
+              class="w-2 h-2 rounded-full bg-amber-400"
+            ></span>
+            <h2
+              id="detail-name"
+              class="text-xs font-semibold uppercase tracking-wider text-slate-200"
+            >
+              Voltage
+            </h2>
+            <span id="detail-icon" class="hidden"></span>
+          </div>
+          <div class="flex items-center gap-3">
+            <div
+              class="flex items-baseline gap-1 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800/90"
+            >
+              <span
+                class="text-[10px] uppercase tracking-wider text-slate-500 mr-1"
+                >Live</span
+              >
+              <span
+                id="detail-current-value"
+                class="font-mono text-sm font-semibold text-white tabular-nums"
+                >0.0</span
+              >
+              <span
+                id="detail-unit"
+                class="text-[10px] font-mono text-slate-400"
+                >V</span
+              >
+            </div>
+            <button
+              onclick="closeDetailView()"
+              class="w-7 h-7 rounded-lg border border-slate-800 bg-slate-950/70 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 flex items-center justify-center transition-colors"
+              title="Close (Esc)"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Compact 3-Column Mini Stats Row -->
+        <div class="grid grid-cols-3 gap-2 mb-2.5">
+          <div
+            class="bg-slate-950/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between"
+          >
+            <span
+              class="text-[10px] font-normal uppercase tracking-wider text-slate-500"
+              >Avg</span
+            >
+            <div class="flex items-baseline gap-0.5">
+              <span
+                id="detail-avg-value"
+                class="font-mono text-xs font-medium text-slate-200 tabular-nums"
+                >0.0</span
+              >
+              <span id="detail-unit-avg" class="text-[10px] text-slate-500"
+                >V</span
+              >
+            </div>
+          </div>
+          <div
+            class="bg-slate-950/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between"
+          >
+            <span
+              class="text-[10px] font-normal uppercase tracking-wider text-slate-500"
+              >Min</span
+            >
+            <div class="flex items-baseline gap-0.5">
+              <span
+                id="detail-min-value"
+                class="font-mono text-xs font-medium text-emerald-400 tabular-nums"
+                >0.0</span
+              >
+              <span id="detail-unit-min" class="text-[10px] text-slate-500"
+                >V</span
+              >
+            </div>
+          </div>
+          <div
+            class="bg-slate-950/80 border border-slate-800/80 rounded-lg px-2.5 py-1.5 flex items-center justify-between"
+          >
+            <span
+              class="text-[10px] font-normal uppercase tracking-wider text-slate-500"
+              >Max</span
+            >
+            <div class="flex items-baseline gap-0.5">
+              <span
+                id="detail-max-value"
+                class="font-mono text-xs font-medium text-rose-400 tabular-nums"
+                >0.0</span
+              >
+              <span id="detail-unit-max" class="text-[10px] text-slate-500"
+                >V</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- Sleek Chart Canvas Container -->
+        <div
+          class="h-44 sm:h-48 w-full bg-slate-950/90 border border-slate-800/80 rounded-xl p-2 mb-2.5"
+        >
+          <canvas id="detail-chart"></canvas>
+        </div>
+
+        <!-- Compact Controls Footer (Time Range + Y-Axis on a single tight bar) -->
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 bg-slate-950/70 border border-slate-800/70 rounded-xl p-2"
+        >
+          <!-- Time Selector -->
+          <div
+            class="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800"
+          >
+            <button
+              class="time-btn active flex-1 sm:flex-initial px-2.5 py-1 rounded-md text-[11px] font-normal text-slate-400 border border-transparent transition-all"
+              onclick="changeTimeRange(60, this)"
+            >
+              1m
+            </button>
+            <button
+              class="time-btn flex-1 sm:flex-initial px-2.5 py-1 rounded-md text-[11px] font-normal text-slate-400 border border-transparent transition-all"
+              onclick="changeTimeRange(300, this)"
+            >
+              5m
+            </button>
+            <button
+              class="time-btn flex-1 sm:flex-initial px-2.5 py-1 rounded-md text-[11px] font-normal text-slate-400 border border-transparent transition-all"
+              onclick="changeTimeRange(600, this)"
+            >
+              10m
+            </button>
+            <button
+              class="time-btn flex-1 sm:flex-initial px-2.5 py-1 rounded-md text-[11px] font-normal text-slate-400 border border-transparent transition-all"
+              onclick="changeTimeRange(1800, this)"
+            >
+              30m
+            </button>
+          </div>
+
+          <!-- Y-Axis Min/Max Inline -->
+          <div class="flex items-center justify-end gap-1.5">
+            <span
+              class="text-[10px] uppercase tracking-wider text-slate-500 mr-0.5"
+              >Y-Axis</span
+            >
+            <input
+              type="number"
+              id="y-min"
+              step="any"
+              placeholder="Min"
+              class="w-14 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-md text-[11px] font-mono text-slate-200 placeholder-slate-600 outline-none text-center"
+            />
+            <span class="text-slate-600 text-[10px]">-</span>
+            <input
+              type="number"
+              id="y-max"
+              step="any"
+              placeholder="Max"
+              class="w-14 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-md text-[11px] font-mono text-slate-200 placeholder-slate-600 outline-none text-center"
+            />
+            <button
+              onclick="applyAxisRange()"
+              class="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors"
+            >
+              Set
+            </button>
+            <button
+              onclick="resetAxisRange()"
+              class="px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-[11px] font-normal transition-colors"
+            >
+              Auto
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Power Confirmation Modal -->
+    <div
+      id="power-confirm-modal"
+      class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+    >
+      <div
+        class="modal-panel w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/60"
+      >
+        <div
+          id="confirm-icon"
+          class="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+        >
+          <svg
+            class="w-6 h-6"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+          </svg>
+        </div>
+        <h3 id="confirm-title" class="text-base font-semibold text-white mb-1">
+          Turn ON Main Output?
+        </h3>
+        <p id="confirm-desc" class="text-xs text-slate-400 mb-6">
+          This will enable the main power relay.
+        </p>
+        <div class="flex items-center gap-2.5">
+          <button
+            onclick="closePowerConfirm()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            id="confirm-action-btn"
+            onclick="confirmPowerAction()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-emerald-600/20"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Verification Modal -->
+    <div
+      id="admin-verify-modal"
+      class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+    >
+      <div
+        class="modal-panel w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/60"
+      >
+        <div
+          class="w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-blue-500/10 border border-blue-500/30 text-blue-400"
+        >
+          <svg
+            class="w-6 h-6"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <h3 class="text-base font-semibold text-white mb-1">
+          Admin Authorization
+        </h3>
+        <p class="text-xs text-slate-400 mb-4">
+          Enter administrator credentials to switch main output.
+        </p>
+        <div class="space-y-2.5 text-left mb-4">
+          <input
+            type="text"
+            id="admin-verify-user"
+            placeholder="Admin username"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 outline-none transition-colors"
+          />
+          <input
+            type="password"
+            id="admin-verify-pass"
+            placeholder="Admin password"
+            class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 outline-none transition-colors"
+          />
+        </div>
+        <p id="admin-verify-error" class="text-xs text-rose-400 mb-4 hidden">
+          Invalid admin credentials
+        </p>
+        <div class="flex items-center gap-2.5">
+          <button
+            onclick="closeAdminVerify()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="confirmAdminVerify()"
+            class="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-blue-600/20"
+          >
+            Verify &amp; Proceed
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div
+      id="toast"
+      class="fixed bottom-5 right-5 z-[70] flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900/95 backdrop-blur-md border border-slate-800 shadow-2xl translate-y-20 opacity-0 pointer-events-none transition-all duration-300"
+    >
+      <span
+        id="toast-dot"
+        class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"
+      ></span>
+      <span id="toast-msg" class="text-xs font-medium text-slate-200"
+        >Action completed</span
+      >
+    </div>
+
+    <script>
+      let currentOutputState = false;
+      let adminVerifyCallback = null;
+      let chartInstance = null;
+      let currentMetric = null;
+      let espOnline = false;
+      let dataHistory = {
+        voltage: [],
+        current: [],
+        power: [],
+        energy: [],
+        pf: [],
+        frequency: [],
+        days: [],
+        uptime: [],
+        timestamps: [],
+      };
+      let maxDataPoints = 1800;
+      let currentTimeRange = 60;
+      let customYAxis = {};
+
+      function showToast(message, type = "success") {
+        const toast = document.getElementById("toast");
+        const dot = document.getElementById("toast-dot");
+        const msg = document.getElementById("toast-msg");
+        msg.textContent = message;
+        dot.className =
+          type === "error"
+            ? "w-2 h-2 rounded-full bg-rose-500 shrink-0"
+            : "w-2 h-2 rounded-full bg-emerald-400 shrink-0";
+        toast.classList.remove("translate-y-20", "opacity-0");
+        setTimeout(() => {
+          toast.classList.add("translate-y-20", "opacity-0");
+        }, 2800);
+      }
+
+      // Verify credentials using /users/list + default fallback
+      async function verifyCredentials(username, password) {
+        try {
+          var response = await fetch("/users/list");
+          var users = await response.json();
+          if (Array.isArray(users)) {
+            var user = users.find(function (u) {
+              return u.username === username && u.password === password;
+            });
+            if (user) {
+              return {
+                success: true,
+                role: user.role,
+                username: user.username,
+              };
+            }
+            return { success: false, error: "Invalid username or password" };
+          }
+        } catch (e) {}
+        if (username === "esp" && password === "456456") {
+          return { success: true, role: "admin", username: "esp" };
+        }
+        return { success: false, error: "Invalid username or password" };
+      }
+
+      function requireAdmin(callback) {
+        adminVerifyCallback = callback;
+        document.getElementById("admin-verify-user").value = "";
+        document.getElementById("admin-verify-pass").value = "";
+        const err = document.getElementById("admin-verify-error");
+        err.classList.add("hidden");
+        document.getElementById("admin-verify-modal").classList.add("show");
+      }
+
+      function closeAdminVerify() {
+        document.getElementById("admin-verify-modal").classList.remove("show");
+        adminVerifyCallback = null;
+      }
+
+      function confirmAdminVerify() {
+        var username = document
+          .getElementById("admin-verify-user")
+          .value.trim();
+        var password = document.getElementById("admin-verify-pass").value;
+        var errorEl = document.getElementById("admin-verify-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter admin credentials";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        verifyCredentials(username, password).then(function (d) {
+          if (d.success && d.role === "admin") {
+            document
+              .getElementById("admin-verify-modal")
+              .classList.remove("show");
+            if (adminVerifyCallback) {
+              adminVerifyCallback();
+              adminVerifyCallback = null;
+            }
+          } else {
+            errorEl.textContent =
+              d.success && d.role !== "admin"
+                ? "User is not an administrator"
+                : d.error || "Invalid credentials";
+            errorEl.classList.remove("hidden");
+          }
+        });
+      }
+
+      function updateBar(selector, percentage) {
+        const bar = document.querySelector(selector);
+        if (bar) {
+          bar.style.width = Math.min(Math.max(percentage, 0), 100) + "%";
+        }
+      }
+
+      function updateEspStatus(online) {
+        espOnline = online;
+        const dot = document.getElementById("esp-status-dot");
+        const txt = document.getElementById("esp-status-text");
+        if (online) {
+          dot.className =
+            "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse";
+          if (txt) {
+            txt.textContent = "Online";
+            txt.className =
+              "text-[11px] font-medium text-emerald-400 hidden sm:inline";
+          }
+        } else {
+          dot.className =
+            "w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_#f43f5e]";
+          if (txt) {
+            txt.textContent = "Offline";
+            txt.className =
+              "text-[11px] font-medium text-slate-400 hidden sm:inline";
+          }
+        }
+      }
+
+      function updatePowerButton(state) {
+        currentOutputState = state;
+        const btn = document.getElementById("power-toggle");
+        if (state) {
+          btn.classList.add("active");
+          btn.title = "Main Output: ON";
+        } else {
+          btn.classList.remove("active");
+          btn.title = "Main Output: OFF";
+        }
+      }
+
+      function updateDateTime() {
+        const now = new Date();
+        const options = {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        };
+        const formatted = now.toLocaleString("en-IN", options);
+        const dtEl = document.getElementById("dateTime");
+        if (dtEl) dtEl.innerText = formatted;
+      }
+
+      updateDateTime();
+      setInterval(updateDateTime, 1000);
+
+      function showPowerConfirm() {
+        const modal = document.getElementById("power-confirm-modal");
+        const title = document.getElementById("confirm-title");
+        const desc = document.getElementById("confirm-desc");
+        const icon = document.getElementById("confirm-icon");
+        const btn = document.getElementById("confirm-action-btn");
+
+        if (currentOutputState) {
+          title.textContent = "Turn OFF Main Output?";
+          desc.textContent =
+            "This will immediately disable the main power relay.";
+          icon.className =
+            "w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-rose-500/10 border border-rose-500/30 text-rose-400";
+          btn.className =
+            "flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-rose-600/20";
+          btn.textContent = "Turn OFF";
+        } else {
+          title.textContent = "Turn ON Main Output?";
+          desc.textContent = "This will enable the main power output relay.";
+          icon.className =
+            "w-12 h-12 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 text-emerald-400";
+          btn.className =
+            "flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-emerald-600/20";
+          btn.textContent = "Turn ON";
+        }
+        modal.classList.add("show");
+      }
+
+      function closePowerConfirm() {
+        document.getElementById("power-confirm-modal").classList.remove("show");
+      }
+
+      function confirmPowerAction() {
+        closePowerConfirm();
+        requireAdmin(function () {
+          const newState = !currentOutputState;
+          fetch("/output/set", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state: newState }),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (data.success) {
+                updatePowerButton(newState);
+                showToast("Main output turned " + (newState ? "ON" : "OFF"));
+              } else {
+                showToast("Failed to change output state", "error");
+              }
+            })
+            .catch(() => showToast("Communication error", "error"));
+        });
+      }
+
+      function updateSensorValues() {
+        fetch("/sensor.json")
+          .then((response) => {
+            updateEspStatus(true);
+            return response.json();
+          })
+          .then((data) => {
+            const now = Date.now();
+            dataHistory.timestamps.push(now);
+
+            const voltage = parseFloat(data.voltage || 0);
+            const current = parseFloat(data.current || 0);
+            const power = parseFloat(data.power || 0);
+            const energy = parseFloat(data.energy || 0);
+            const pf = parseFloat(data.pf || 0);
+            const frequency = parseFloat(data.frequency || 0);
+            const days = parseFloat(data.days || 0);
+            const uptime = parseFloat(data.uptime || 0);
+
+            document.getElementById("voltage").textContent = voltage.toFixed(1);
+            document.getElementById("current").textContent = current.toFixed(2);
+            document.getElementById("power").textContent = power.toFixed(1);
+            document.getElementById("energy").textContent = energy.toFixed(2);
+            document.getElementById("pf").textContent = pf.toFixed(2);
+            document.getElementById("frequency").textContent =
+              frequency.toFixed(2);
+            document.getElementById("totalDays").textContent = days.toFixed(1);
+            document.getElementById("uptime").textContent = uptime.toFixed(1);
+            if (data.resetTime) {
+              document.getElementById("energy-reset-time").textContent =
+                data.resetTime;
+            }
+
+            dataHistory.voltage.push(voltage);
+            dataHistory.current.push(current);
+            dataHistory.power.push(power);
+            dataHistory.energy.push(energy);
+            dataHistory.pf.push(pf);
+            dataHistory.frequency.push(frequency);
+            dataHistory.days.push(days);
+            dataHistory.uptime.push(uptime);
+
+            if (dataHistory.timestamps.length > maxDataPoints) {
+              Object.keys(dataHistory).forEach((key) =>
+                dataHistory[key].shift(),
+              );
+            }
+
+            if (data.mainOutput !== undefined) {
+              updatePowerButton(
+                data.mainOutput === 1 || data.mainOutput === true,
+              );
+            }
+
+            updateBar(".voltage-fill", (voltage / 300) * 100);
+            updateBar(".current-fill", (current / 30) * 100);
+            updateBar(".power-fill", (power / 5000) * 100);
+            updateBar(".energy-fill", (energy / 500) * 100);
+            updateBar(".frequency-fill", ((frequency - 48) / 4) * 100);
+            updateBar(".pf-fill", pf * 100);
+            updateBar(".days-fill", (days / 90) * 100);
+            updateBar(".uptime-fill", (uptime / 24) * 100);
+
+            updateTimestamp();
+
+            if (
+              currentMetric &&
+              document.getElementById("detail-modal").classList.contains("show")
+            ) {
+              updateDetailChart();
+            }
+          })
+          .catch(() => {
+            updateEspStatus(false);
+          });
+      }
+
+      function updateTimestamp() {
+        const el = document.getElementById("footer-datetime");
+        if (!el) return;
+        const now = new Date();
+        el.textContent = now.toLocaleString("en-IN");
+      }
+
+      function openDetailView(metric, name, unit, icon = "") {
+        currentMetric = metric;
+        document.getElementById("detail-icon").textContent = icon;
+        document.getElementById("detail-name").textContent =
+          name + " Telemetry";
+        document.getElementById("detail-unit").textContent = unit;
+        document.getElementById("detail-unit-avg").textContent = unit;
+        document.getElementById("detail-unit-min").textContent = unit;
+        document.getElementById("detail-unit-max").textContent = unit;
+
+        const dot = document.getElementById("detail-dot");
+        const dotColors = {
+          voltage: "w-2 h-2 rounded-full bg-amber-400",
+          current: "w-2 h-2 rounded-full bg-cyan-400",
+          power: "w-2 h-2 rounded-full bg-rose-400",
+        };
+        dot.className = dotColors[metric] || "w-2 h-2 rounded-full bg-blue-400";
+
+        if (customYAxis[metric]) {
+          document.getElementById("y-min").value =
+            customYAxis[metric].min !== undefined
+              ? customYAxis[metric].min
+              : "";
+          document.getElementById("y-max").value =
+            customYAxis[metric].max !== undefined
+              ? customYAxis[metric].max
+              : "";
+        } else {
+          document.getElementById("y-min").value = "";
+          document.getElementById("y-max").value = "";
+        }
+
+        updateDetailStats();
+        createChart();
+        document.getElementById("detail-modal").classList.add("show");
+      }
+
+      function closeDetailView() {
+        document.getElementById("detail-modal").classList.remove("show");
+        if (chartInstance) {
+          chartInstance.destroy();
+          chartInstance = null;
+        }
+        currentMetric = null;
+      }
+
+      function updateDetailStats() {
+        if (!currentMetric || dataHistory[currentMetric].length === 0) return;
+        const data = dataHistory[currentMetric];
+        const current = data[data.length - 1];
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const decimals =
+          currentMetric === "current" ||
+          currentMetric === "pf" ||
+          currentMetric === "frequency" ||
+          currentMetric === "energy"
+            ? 2
+            : 1;
+
+        document.getElementById("detail-current-value").textContent =
+          current.toFixed(decimals);
+        document.getElementById("detail-avg-value").textContent =
+          avg.toFixed(decimals);
+        document.getElementById("detail-min-value").textContent =
+          min.toFixed(decimals);
+        document.getElementById("detail-max-value").textContent =
+          max.toFixed(decimals);
+      }
+
+      function createChart() {
+        const ctx = document.getElementById("detail-chart").getContext("2d");
+        if (chartInstance) chartInstance.destroy();
+
+        const palette = {
+          voltage: {
+            start: "rgba(251, 191, 36, 0.22)",
+            end: "rgba(251, 191, 36, 0.0)",
+            border: "#fbbf24",
+          },
+          current: {
+            start: "rgba(6, 182, 212, 0.22)",
+            end: "rgba(6, 182, 212, 0.0)",
+            border: "#22d3ee",
+          },
+          power: {
+            start: "rgba(244, 63, 94, 0.22)",
+            end: "rgba(244, 63, 94, 0.0)",
+            border: "#fb7185",
+          },
+        };
+
+        const colors = palette[currentMetric] || palette.voltage;
+        const gradient = ctx.createLinearGradient(0, 0, 0, 180);
+        gradient.addColorStop(0, colors.start);
+        gradient.addColorStop(1, colors.end);
+
+        const filteredData = getFilteredData();
+        const yAxisConfig = {
+          voltage: { min: 0, max: 300 },
+          current: { min: 0, max: 30 },
+          power: { min: 0, max: 5000 },
+        };
+
+        let yAxis = yAxisConfig[currentMetric] || { min: 0, max: undefined };
+        if (customYAxis[currentMetric]) {
+          yAxis = {
+            min:
+              customYAxis[currentMetric].min !== undefined
+                ? customYAxis[currentMetric].min
+                : yAxis.min,
+            max:
+              customYAxis[currentMetric].max !== undefined
+                ? customYAxis[currentMetric].max
+                : yAxis.max,
+          };
+        }
+
+        chartInstance = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: filteredData.labels,
+            datasets: [
+              {
+                label: currentMetric,
+                data: filteredData.values,
+                borderColor: colors.border,
+                backgroundColor: gradient,
+                borderWidth: 1.5,
+                fill: true,
+                tension: 0.35,
+                pointRadius: 0,
+                pointHoverRadius: 3.5,
+                pointHoverBackgroundColor: colors.border,
+                pointHoverBorderColor: "#0f172a",
+                pointHoverBorderWidth: 1.5,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: "index" },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: "rgba(2, 6, 23, 0.92)",
+                titleColor: "#94a3b8",
+                bodyColor: "#f8fafc",
+                titleFont: {
+                  family: "JetBrains Mono",
+                  size: 10,
+                  weight: "400",
+                },
+                bodyFont: { family: "JetBrains Mono", size: 11, weight: "600" },
+                borderColor: "rgba(51, 65, 85, 0.8)",
+                borderWidth: 1,
+                padding: 8,
+                displayColors: false,
+                callbacks: {
+                  title: (context) => context[0].label,
+                  label: (context) =>
+                    context.parsed.y.toFixed(2) +
+                    " " +
+                    document.getElementById("detail-unit").textContent,
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: { color: "rgba(51, 65, 85, 0.22)", drawBorder: false },
+                ticks: {
+                  color: "#64748b",
+                  maxTicksLimit: 5,
+                  maxRotation: 0,
+                  font: { family: "JetBrains Mono", size: 9 },
+                },
+              },
+              y: {
+                min: yAxis.min,
+                max: yAxis.max,
+                grid: { color: "rgba(51, 65, 85, 0.22)", drawBorder: false },
+                ticks: {
+                  color: "#64748b",
+                  maxTicksLimit: 5,
+                  font: { family: "JetBrains Mono", size: 9 },
+                  callback: (value) => Number(value).toFixed(0),
+                },
+              },
+            },
+            animation: { duration: 300 },
+          },
+        });
+      }
+
+      function getFilteredData() {
+        if (!currentMetric || dataHistory[currentMetric].length === 0)
+          return { labels: [], values: [] };
+        const now = Date.now();
+        const cutoffTime = now - currentTimeRange * 1000;
+        const labels = [],
+          values = [];
+
+        for (let i = 0; i < dataHistory.timestamps.length; i++) {
+          if (dataHistory.timestamps[i] >= cutoffTime) {
+            labels.push(
+              new Date(dataHistory.timestamps[i]).toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              }),
+            );
+            values.push(dataHistory[currentMetric][i]);
+          }
+        }
+        return { labels, values };
+      }
+
+      function updateDetailChart() {
+        if (!chartInstance || !currentMetric) return;
+        const filteredData = getFilteredData();
+        chartInstance.data.labels = filteredData.labels;
+        chartInstance.data.datasets[0].data = filteredData.values;
+        chartInstance.update("none");
+        updateDetailStats();
+      }
+
+      function changeTimeRange(seconds, btnEl) {
+        currentTimeRange = seconds;
+        document
+          .querySelectorAll(".time-btn")
+          .forEach((btn) => btn.classList.remove("active"));
+        const targetBtn = btnEl || (window.event && window.event.target);
+        if (targetBtn) targetBtn.classList.add("active");
+        if (chartInstance) updateDetailChart();
+      }
+
+      function applyAxisRange() {
+        if (!currentMetric) return;
+        const minVal = document.getElementById("y-min").value;
+        const maxVal = document.getElementById("y-max").value;
+        customYAxis[currentMetric] = {
+          min: minVal !== "" ? parseFloat(minVal) : undefined,
+          max: maxVal !== "" ? parseFloat(maxVal) : undefined,
+        };
+        createChart();
+      }
+
+      function resetAxisRange() {
+        if (!currentMetric) return;
+        delete customYAxis[currentMetric];
+        document.getElementById("y-min").value = "";
+        document.getElementById("y-max").value = "";
+        createChart();
+      }
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          closeDetailView();
+          closePowerConfirm();
+          closeAdminVerify();
+        }
+      });
+
+      document.addEventListener("DOMContentLoaded", () => {
+        updateSensorValues();
+        setInterval(updateSensorValues, 1000);
+        document
+          .getElementById("admin-verify-pass")
+          .addEventListener("keydown", (e) => {
+            if (e.key === "Enter") confirmAdminVerify();
+          });
+      });
+    </script>
+  </body>
+</html>
