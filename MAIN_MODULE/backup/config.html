@@ -788,12 +788,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="mdns-enabled"
-                      checked
-                      onchange="saveSetting('mdnsEnabled', this.checked)"
-                    />
+                    <input type="checkbox" id="mdns-enabled" checked />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -899,11 +894,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="nodered-enabled"
-                      onchange="saveSetting('nodeRedEnabled', this.checked)"
-                    />
+                    <input type="checkbox" id="nodered-enabled" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1005,11 +996,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="main-output"
-                      onchange="saveSetting('mainOutput', this.checked)"
-                    />
+                    <input type="checkbox" id="main-output" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1023,11 +1010,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="kwh-saver"
-                      onchange="saveSetting('kWhSaver', this.checked)"
-                    />
+                    <input type="checkbox" id="kwh-saver" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1089,11 +1072,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="afpc-enabled"
-                      onchange="saveSetting('afpcEnabled', this.checked)"
-                    />
+                    <input type="checkbox" id="afpc-enabled" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1117,9 +1096,6 @@
                       min="0.50"
                       max="0.99"
                       step="0.01"
-                      onchange="
-                        saveSetting('targetFactor', parseFloat(this.value))
-                      "
                       class="w-20 px-3 py-2 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1148,9 +1124,6 @@
                       min="0.1"
                       max="15.0"
                       step="0.1"
-                      onchange="
-                        saveSetting('mfdPerChannel', parseFloat(this.value))
-                      "
                       class="w-20 px-3 py-2 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1212,7 +1185,6 @@
                       value="250"
                       min="150"
                       max="280"
-                      onchange="saveSetting('voltHigh', parseInt(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1239,7 +1211,6 @@
                       value="180"
                       min="120"
                       max="250"
-                      onchange="saveSetting('voltLow', parseInt(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1281,7 +1252,6 @@
                       min="100"
                       max="9900"
                       step="100"
-                      onchange="saveSetting('powerHigh', parseInt(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1309,7 +1279,6 @@
                       min="100"
                       max="9900"
                       step="100"
-                      onchange="saveSetting('powerLow', parseInt(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1337,7 +1306,6 @@
                       min="1"
                       max="9000"
                       step="5"
-                      onchange="saveSetting('maxkWh', parseInt(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1379,7 +1347,6 @@
                       min="49.00"
                       max="51.00"
                       step="0.01"
-                      onchange="saveSetting('freqHigh', parseFloat(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1407,7 +1374,6 @@
                       min="49.00"
                       max="51.00"
                       step="0.01"
-                      onchange="saveSetting('freqLow', parseFloat(this.value))"
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1434,9 +1400,6 @@
                       value="50"
                       min="1"
                       max="9900"
-                      onchange="
-                        saveSetting('afpcLowWatt', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1464,9 +1427,6 @@
                       min="100"
                       max="9900"
                       step="50"
-                      onchange="
-                        saveSetting('afpcHighWatt', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1514,11 +1474,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-volt-high"
-                      onchange="saveSetting('highVoltageAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-volt-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1532,11 +1488,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-volt-low"
-                      onchange="saveSetting('lowVoltageAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-volt-low" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1550,11 +1502,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-power-high"
-                      onchange="saveSetting('highPowerAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-power-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1568,11 +1516,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-power-low"
-                      onchange="saveSetting('lowPowerAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-power-low" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1586,11 +1530,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-freq-low"
-                      onchange="saveSetting('lowFreqAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-freq-low" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1604,11 +1544,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="alert-freq-high"
-                      onchange="saveSetting('highFreqAlert', this.checked)"
-                    />
+                    <input type="checkbox" id="alert-freq-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1651,11 +1587,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="prot-volt-high"
-                      onchange="saveSetting('highVProtec', this.checked)"
-                    />
+                    <input type="checkbox" id="prot-volt-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1669,11 +1601,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="prot-volt-low"
-                      onchange="saveSetting('LowVProtec', this.checked)"
-                    />
+                    <input type="checkbox" id="prot-volt-low" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1687,11 +1615,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="prot-power-high"
-                      onchange="saveSetting('highPProtec', this.checked)"
-                    />
+                    <input type="checkbox" id="prot-power-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1705,11 +1629,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="prot-freq-high"
-                      onchange="saveSetting('highHzProtec', this.checked)"
-                    />
+                    <input type="checkbox" id="prot-freq-high" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1723,11 +1643,7 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input
-                      type="checkbox"
-                      id="prot-freq-low"
-                      onchange="saveSetting('lowHzProtec', this.checked)"
-                    />
+                    <input type="checkbox" id="prot-freq-low" />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1777,9 +1693,6 @@
                       value="2"
                       min="1"
                       max="300"
-                      onchange="
-                        saveSetting('espShareInterval', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1806,9 +1719,6 @@
                       value="5"
                       min="5"
                       max="300"
-                      onchange="
-                        saveSetting('nodeRedInterval', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1835,9 +1745,6 @@
                       value="1"
                       min="1"
                       max="60"
-                      onchange="
-                        saveSetting('pzemInterval', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1865,9 +1772,6 @@
                       min="15"
                       max="600"
                       step="5"
-                      onchange="
-                        saveSetting('alertInterval', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1895,9 +1799,6 @@
                       min="60"
                       max="3600"
                       step="60"
-                      onchange="
-                        saveSetting('protectionDelay', parseInt(this.value))
-                      "
                       class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                     />
                     <span
@@ -1951,7 +1852,6 @@
                     value="60"
                     min="0"
                     max="300"
-                    onchange="saveSetting('startupTime', parseInt(this.value))"
                     class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                   />
                   <span
@@ -2066,52 +1966,59 @@
                       Regional offset for NTP time synchronization
                     </div>
                   </div>
-                  <select
-                    id="timezone-select"
-                    onchange="saveTimezone(this.value)"
-                    class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-200 outline-none"
-                  >
-                    <option value="-43200">BIT (UTC-12:00)</option>
-                    <option value="-39600">SST (UTC-11:00)</option>
-                    <option value="-36000">HST (UTC-10:00)</option>
-                    <option value="-34200">MART (UTC-9:30)</option>
-                    <option value="-32400">AKST (UTC-9:00)</option>
-                    <option value="-28800">PST (UTC-8:00)</option>
-                    <option value="-25200">MST (UTC-7:00)</option>
-                    <option value="-21600">CST (UTC-6:00)</option>
-                    <option value="-18000">EST (UTC-5:00)</option>
-                    <option value="-16200">VET (UTC-4:30)</option>
-                    <option value="-14400">AST (UTC-4:00)</option>
-                    <option value="-12600">NST (UTC-3:30)</option>
-                    <option value="-10800">ART (UTC-3:00)</option>
-                    <option value="-7200">GST (UTC-2:00)</option>
-                    <option value="-3600">AZOT (UTC-1:00)</option>
-                    <option value="0">UTC (UTC+0:00)</option>
-                    <option value="3600">CET (UTC+1:00)</option>
-                    <option value="7200">EET (UTC+2:00)</option>
-                    <option value="10800">MSK (UTC+3:00)</option>
-                    <option value="12600">IRST (UTC+3:30)</option>
-                    <option value="14400">GST (UTC+4:00)</option>
-                    <option value="16200">AFT (UTC+4:30)</option>
-                    <option value="18000">PKT (UTC+5:00)</option>
-                    <option value="19800" selected>IST (UTC+5:30)</option>
-                    <option value="20700">NPT (UTC+5:45)</option>
-                    <option value="21600">BST (UTC+6:00)</option>
-                    <option value="23400">MMT (UTC+6:30)</option>
-                    <option value="25200">ICT (UTC+7:00)</option>
-                    <option value="28800">CST (UTC+8:00)</option>
-                    <option value="30600">CWST (UTC+8:30)</option>
-                    <option value="31500">ACWST (UTC+8:45)</option>
-                    <option value="32400">JST (UTC+9:00)</option>
-                    <option value="34200">ACST (UTC+9:30)</option>
-                    <option value="36000">AEST (UTC+10:00)</option>
-                    <option value="37800">LHST (UTC+10:30)</option>
-                    <option value="39600">SBT (UTC+11:00)</option>
-                    <option value="43200">NZST (UTC+12:00)</option>
-                    <option value="45900">CHAST (UTC+12:45)</option>
-                    <option value="46800">TOT (UTC+13:00)</option>
-                    <option value="50400">LINT (UTC+14:00)</option>
-                  </select>
+                  <div class="flex items-center gap-2">
+                    <select
+                      id="timezone-select"
+                      class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-200 outline-none"
+                    >
+                      <option value="-43200">BIT (UTC-12:00)</option>
+                      <option value="-39600">SST (UTC-11:00)</option>
+                      <option value="-36000">HST (UTC-10:00)</option>
+                      <option value="-34200">MART (UTC-9:30)</option>
+                      <option value="-32400">AKST (UTC-9:00)</option>
+                      <option value="-28800">PST (UTC-8:00)</option>
+                      <option value="-25200">MST (UTC-7:00)</option>
+                      <option value="-21600">CST (UTC-6:00)</option>
+                      <option value="-18000">EST (UTC-5:00)</option>
+                      <option value="-16200">VET (UTC-4:30)</option>
+                      <option value="-14400">AST (UTC-4:00)</option>
+                      <option value="-12600">NST (UTC-3:30)</option>
+                      <option value="-10800">ART (UTC-3:00)</option>
+                      <option value="-7200">GST (UTC-2:00)</option>
+                      <option value="-3600">AZOT (UTC-1:00)</option>
+                      <option value="0">UTC (UTC+0:00)</option>
+                      <option value="3600">CET (UTC+1:00)</option>
+                      <option value="7200">EET (UTC+2:00)</option>
+                      <option value="10800">MSK (UTC+3:00)</option>
+                      <option value="12600">IRST (UTC+3:30)</option>
+                      <option value="14400">GST (UTC+4:00)</option>
+                      <option value="16200">AFT (UTC+4:30)</option>
+                      <option value="18000">PKT (UTC+5:00)</option>
+                      <option value="19800" selected>IST (UTC+5:30)</option>
+                      <option value="20700">NPT (UTC+5:45)</option>
+                      <option value="21600">BST (UTC+6:00)</option>
+                      <option value="23400">MMT (UTC+6:30)</option>
+                      <option value="25200">ICT (UTC+7:00)</option>
+                      <option value="28800">CST (UTC+8:00)</option>
+                      <option value="30600">CWST (UTC+8:30)</option>
+                      <option value="31500">ACWST (UTC+8:45)</option>
+                      <option value="32400">JST (UTC+9:00)</option>
+                      <option value="34200">ACST (UTC+9:30)</option>
+                      <option value="36000">AEST (UTC+10:00)</option>
+                      <option value="37800">LHST (UTC+10:30)</option>
+                      <option value="39600">SBT (UTC+11:00)</option>
+                      <option value="43200">NZST (UTC+12:00)</option>
+                      <option value="45900">CHAST (UTC+12:45)</option>
+                      <option value="46800">TOT (UTC+13:00)</option>
+                      <option value="50400">LINT (UTC+14:00)</option>
+                    </select>
+                    <button
+                      onclick="saveTimezone()"
+                      class="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shrink-0"
+                    >
+                      Save
+                    </button>
+                  </div>
                 </div>
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
@@ -2312,7 +2219,7 @@
                       Countdown Duration
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Turns OFF main output when timer expires
+                      Wait time before executing target relay action
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
@@ -2350,6 +2257,40 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- Target Relay Action When Timer Ends -->
+                <div
+                  class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-800/60"
+                >
+                  <div>
+                    <div class="text-xs font-medium text-slate-200">
+                      Action When Time Ends
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                      Turn ON skips automatically if any protection is active
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 w-full sm:w-48">
+                    <button
+                      type="button"
+                      id="timer-action-on"
+                      onclick="setQuickTimerAction('on')"
+                      class="action-btn py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center transition-all"
+                    >
+                      Turn ON
+                    </button>
+                    <button
+                      type="button"
+                      id="timer-action-off"
+                      onclick="setQuickTimerAction('off')"
+                      class="action-btn off active py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-medium text-slate-400 flex items-center justify-center transition-all"
+                    >
+                      Turn OFF
+                    </button>
+                  </div>
+                  <input type="hidden" id="timer-action" value="off" />
+                </div>
+
                 <div class="flex items-center gap-2.5 pt-1">
                   <button
                     onclick="startTimer()"
@@ -3068,6 +3009,60 @@
       </div>
     </div>
 
+    <!-- 60s Restarting Modal with Blur Background & 30s Auto-Refresh Retry -->
+    <div
+      class="modal-overlay fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-lg"
+      id="restart-modal"
+    >
+      <div
+        class="modal-box w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center shadow-2xl shadow-black/80"
+      >
+        <div
+          class="relative w-16 h-16 mx-auto mb-4 flex items-center justify-center"
+        >
+          <div
+            class="absolute inset-0 rounded-full border-2 border-blue-500/20"
+          ></div>
+          <div
+            class="absolute inset-0 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"
+          ></div>
+          <span
+            id="restart-countdown-num"
+            class="font-mono text-sm font-bold text-blue-400 tabular-nums"
+            >60s</span
+          >
+        </div>
+        <h3
+          id="restart-modal-title"
+          class="text-base font-semibold text-white mb-1"
+        >
+          Restarting Controller...
+        </h3>
+        <p
+          id="restart-modal-desc"
+          class="text-xs text-slate-400 mb-4 leading-relaxed"
+        >
+          Please wait while the ESP32 reboots, syncs WiFi/NTP, and completes
+          startup safety checks.
+        </p>
+        <div
+          class="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden mb-3"
+        >
+          <div
+            id="restart-progress-bar"
+            class="h-full bg-gradient-to-r from-blue-600 to-cyan-400 rounded-full transition-all duration-1000"
+            style="width: 0%"
+          ></div>
+        </div>
+        <div
+          id="restart-status-sub"
+          class="text-[11px] font-mono text-slate-500"
+        >
+          Auto-refreshing in 60s...
+        </div>
+      </div>
+    </div>
+
     <!-- Floating Toast Notification -->
     <div
       id="toast"
@@ -3186,13 +3181,28 @@
             fetch("/automation/timer/status")
               .then((r) => r.json())
               .then((d) => {
+                if (d.action) setQuickTimerAction(d.action);
                 if (d.active && d.remaining > 0) {
                   timerEndTime = Date.now() + d.remaining * 1000;
                   updateTimerDisplay();
+                  if (timerInterval) clearInterval(timerInterval);
                   timerInterval = setInterval(updateTimerDisplay, 1000);
                 }
               })
               .catch(() => {});
+
+            // Real-time sync for Main Output toggle on config.html
+            setInterval(() => {
+              fetch("/sensor.json")
+                .then((r) => r.json())
+                .then((s) => {
+                  const outEl = document.getElementById("main-output");
+                  if (outEl && s.mainOutput !== undefined) {
+                    outEl.checked = s.mainOutput === 1 || s.mainOutput === true;
+                  }
+                })
+                .catch(() => {});
+            }, 2000);
           } else {
             errorEl.textContent = d.error || "Invalid username or password";
             errorEl.classList.remove("hidden");
@@ -3202,10 +3212,6 @@
 
       // Admin verification for protected actions
       function requireAdmin(callback) {
-        if (currentUser && currentUser.role === "admin") {
-          callback();
-          return;
-        }
         adminVerifyCallback = callback;
         document.getElementById("admin-verify-user").value = "";
         document.getElementById("admin-verify-pass").value = "";
@@ -3535,15 +3541,20 @@
       }
 
       // WiFi functions
-      function connectWiFi() {
+      function disconnectWiFi() {
         showConfirmModal(
-          "info",
-          "Start WiFi Portal?",
-          'The device will create an access point named "ESP.EnergyLog". Connect to it to configure WiFi.',
+          "warning",
+          "Disconnect WiFi?",
+          "Disconnect from the current wireless network?",
           () => {
-            fetch("/wifi/connect", { method: "POST" })
-              .then(() => showToast("WiFi portal started"))
-              .catch(() => showToast("Failed", "error"));
+            requireAdmin(() => {
+              fetch("/wifi/disconnect", { method: "POST" })
+                .then(() => {
+                  showToast("Disconnected");
+                  updateWiFiStatus();
+                })
+                .catch(() => showToast("Failed", "error"));
+            });
           },
         );
       }
@@ -3564,21 +3575,9 @@
         );
       }
 
-      function forgetWiFi() {
-        showConfirmModal(
-          "danger",
-          "Forget WiFi Network?",
-          "This will remove saved WiFi credentials and restart the device.",
-          () => {
-            fetch("/wifi/forget", { method: "POST" })
-              .then(() => showToast("WiFi credentials cleared. Restarting..."))
-              .catch(() => showToast("Failed", "error"));
-          },
-        );
-      }
-
       // Node-RED functions
       function saveNodeRedSettings() {
+        const enabled = document.getElementById("nodered-enabled").checked;
         const ip = document.getElementById("nodered-ip").value.trim();
         const port =
           document.getElementById("nodered-port").value.trim() || "1880";
@@ -3587,7 +3586,7 @@
         fetch("/nodered/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address: fullAddress }),
+          body: JSON.stringify({ enabled: enabled, address: fullAddress }),
         })
           .then((r) => r.json())
           .then((d) =>
@@ -3693,20 +3692,6 @@
         }
       }
 
-      // Data & System functions
-      function clearEnergy() {
-        fetch("/data/clear-kwh", { method: "POST" })
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.success) {
-              showToast("Energy counter cleared & timestamp saved");
-            } else {
-              showToast(d.error || "NTP not synced! Reset blocked.", "error");
-            }
-          })
-          .catch(() => showToast("Connection error", "error"));
-      }
-
       function clearDays() {
         fetch("/data/clear-days", { method: "POST" })
           .then((r) => r.json())
@@ -3726,21 +3711,133 @@
           .catch(() => showToast("Failed", "error"));
       }
 
-      function factoryResetSettings() {
-        fetch("/factory/reset-settings", { method: "POST" })
-          .then(() => showToast("Settings restored. Restarting..."))
-          .catch(() => showToast("Failed", "error"));
-      }
-
       function syncTime() {
         fetch("/time/sync", { method: "POST" })
           .then(() => showToast("Time synchronized"))
           .catch(() => showToast("Failed", "error"));
       }
 
+      let restartTimerId = null;
+
+      function showRestartModal(initialSeconds = 60) {
+        const modal = document.getElementById("restart-modal");
+        const numEl = document.getElementById("restart-countdown-num");
+        const titleEl = document.getElementById("restart-modal-title");
+        const descEl = document.getElementById("restart-modal-desc");
+        const barEl = document.getElementById("restart-progress-bar");
+        const subEl = document.getElementById("restart-status-sub");
+
+        if (restartTimerId) clearInterval(restartTimerId);
+        modal.classList.add("active");
+
+        let totalSec = initialSeconds;
+        let remaining = initialSeconds;
+        let isRetryPhase = false;
+
+        function tick() {
+          numEl.textContent = remaining + "s";
+          const pct = Math.min(
+            100,
+            Math.max(0, ((totalSec - remaining) / totalSec) * 100),
+          );
+          barEl.style.width = pct + "%";
+
+          if (!isRetryPhase) {
+            subEl.textContent = "Auto-refreshing page in " + remaining + "s...";
+          } else {
+            subEl.textContent =
+              "Device still booting... Next retry in " + remaining + "s";
+          }
+
+          if (remaining <= 0) {
+            clearInterval(restartTimerId);
+            subEl.textContent = "Checking if ESP32 is online...";
+            numEl.textContent = "...";
+
+            const ctrl = new AbortController();
+            const timeoutId = setTimeout(() => ctrl.abort(), 4500);
+
+            fetch("/sensor.json?t=" + Date.now(), {
+              cache: "no-store",
+              signal: ctrl.signal,
+            })
+              .then((r) => {
+                clearTimeout(timeoutId);
+                if (r.ok) {
+                  subEl.textContent = "Connected! Reloading page...";
+                  window.location.reload();
+                } else {
+                  throw new Error("Not ready");
+                }
+              })
+              .catch(() => {
+                clearTimeout(timeoutId);
+                // Page not found / ESP32 still in startup delay -> retry in 30s
+                isRetryPhase = true;
+                totalSec = 30;
+                remaining = 30;
+                titleEl.textContent = "Waiting for ESP32...";
+                descEl.textContent =
+                  "Device is still completing startup checks. Page will auto-refresh every 30s.";
+                barEl.style.width = "0%";
+                restartTimerId = setInterval(tick, 1000);
+              });
+            return;
+          }
+          remaining--;
+        }
+
+        tick();
+        restartTimerId = setInterval(tick, 1000);
+      }
+
+      function clearEnergy() {
+        fetch("/data/clear-kwh", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              showToast("Energy counter cleared. Restarting...");
+              showRestartModal(60);
+            } else {
+              showToast(d.error || "NTP not synced! Reset blocked.", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      function forgetWiFi() {
+        showConfirmModal(
+          "danger",
+          "Forget WiFi Network?",
+          "This will remove saved WiFi credentials and restart the device.",
+          () => {
+            requireAdmin(() => {
+              fetch("/wifi/forget", { method: "POST" })
+                .then(() => {
+                  showToast("WiFi credentials cleared. Restarting...");
+                  showRestartModal(60);
+                })
+                .catch(() => showToast("Failed", "error"));
+            });
+          },
+        );
+      }
+
+      function factoryResetSettings() {
+        fetch("/factory/reset-settings", { method: "POST" })
+          .then(() => {
+            showToast("Settings restored. Restarting...");
+            showRestartModal(60);
+          })
+          .catch(() => showToast("Failed", "error"));
+      }
+
       function restartDevice() {
         fetch("/restart", { method: "POST" })
-          .then(() => showToast("Device restarting..."))
+          .then(() => {
+            showToast("Device restarting...");
+            showRestartModal(60);
+          })
           .catch(() => showToast("Failed", "error"));
       }
 
@@ -3937,11 +4034,25 @@
       let timerInterval = null;
       let timerEndTime = null;
 
+      let timerActionTarget = "off";
+
+      function setQuickTimerAction(action) {
+        timerActionTarget = action;
+        document.getElementById("timer-action").value = action;
+        document
+          .getElementById("timer-action-on")
+          .classList.toggle("active", action === "on");
+        document
+          .getElementById("timer-action-off")
+          .classList.toggle("active", action === "off");
+      }
+
       function startTimer() {
         const hours =
           parseInt(document.getElementById("timer-hours").value) || 0;
         const minutes =
           parseInt(document.getElementById("timer-minutes").value) || 0;
+        const action = document.getElementById("timer-action").value || "off";
         const totalSeconds = (hours * 60 + minutes) * 60;
 
         if (totalSeconds <= 0) {
@@ -3952,34 +4063,21 @@
         fetch("/automation/timer/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ duration: totalSeconds }),
+          body: JSON.stringify({ duration: totalSeconds, action: action }),
         })
           .then((r) => r.json())
           .then((d) => {
             if (d.success) {
               timerEndTime = Date.now() + totalSeconds * 1000;
+              timerActionTarget = action;
               updateTimerDisplay();
               if (timerInterval) clearInterval(timerInterval);
               timerInterval = setInterval(updateTimerDisplay, 1000);
-              showToast("Countdown timer started");
+              showToast(
+                "Timer started (Output will turn " + action.toUpperCase() + ")",
+              );
             } else {
               showToast("Failed to start timer", "error");
-            }
-          })
-          .catch(() => showToast("Connection error", "error"));
-      }
-
-      function cancelTimer() {
-        fetch("/automation/timer/cancel", { method: "POST" })
-          .then((r) => r.json())
-          .then((d) => {
-            if (d.success) {
-              clearInterval(timerInterval);
-              timerInterval = null;
-              timerEndTime = null;
-              document.getElementById("timer-status").textContent =
-                "Not active";
-              showToast("Timer cancelled");
             }
           })
           .catch(() => showToast("Connection error", "error"));
@@ -4000,8 +4098,25 @@
         const h = Math.floor(remaining / 3600);
         const m = Math.floor((remaining % 3600) / 60);
         const s = remaining % 60;
+        const actLabel = timerActionTarget === "on" ? "→ ON" : "→ OFF";
         document.getElementById("timer-status").textContent =
-          `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")} remaining`;
+          `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")} (${actLabel})`;
+      }
+
+      function cancelTimer() {
+        fetch("/automation/timer/cancel", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              clearInterval(timerInterval);
+              timerInterval = null;
+              timerEndTime = null;
+              document.getElementById("timer-status").textContent =
+                "Not active";
+              showToast("Timer cancelled");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
       }
 
       // Schedule Modal functions
@@ -4105,19 +4220,21 @@
           "Delete Schedule",
           "Are you sure you want to delete this schedule?",
           () => {
-            fetch("/automation/schedule/delete", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index }),
-            })
-              .then((r) => r.json())
-              .then((d) => {
-                if (d.success) {
-                  loadSchedules();
-                  showToast("Schedule deleted");
-                }
+            requireAdmin(() => {
+              fetch("/automation/schedule/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ index }),
               })
-              .catch(() => showToast("Connection error", "error"));
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.success) {
+                    loadSchedules();
+                    showToast("Schedule deleted");
+                  }
+                })
+                .catch(() => showToast("Connection error", "error"));
+            });
           },
         );
       }
@@ -4207,19 +4324,21 @@
           "Delete Schedule",
           "Are you sure you want to delete this future schedule?",
           () => {
-            fetch("/automation/future/delete", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ index }),
-            })
-              .then((r) => r.json())
-              .then((d) => {
-                if (d.success) {
-                  loadFutureSchedules();
-                  showToast("Future schedule deleted");
-                }
+            requireAdmin(() => {
+              fetch("/automation/future/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ index }),
               })
-              .catch(() => showToast("Connection error", "error"));
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.success) {
+                    loadFutureSchedules();
+                    showToast("Future schedule deleted");
+                  }
+                })
+                .catch(() => showToast("Connection error", "error"));
+            });
           },
         );
       }
@@ -4397,14 +4516,22 @@
           });
       });
 
-      // Protect functions requiring admin verification
+      // Protect ALL parameter update and control functions with admin verification
       (function () {
         var protectedFns = [
           "saveMdnsSettings",
           "resetMdnsDefault",
           "deleteMdns",
+          "saveNodeRedSettings",
           "saveOutputSettings",
           "saveAfpcSettings",
+          "saveThresholdSettings",
+          "saveAlertSettings",
+          "saveProtectionSettings",
+          "saveIntervalSettings",
+          "saveStartupSettings",
+          "saveTimezone",
+          "syncTime",
           "clearEnergy",
           "clearDays",
           "factoryResetData",
@@ -4414,8 +4541,6 @@
           "cancelTimer",
           "saveSchedule",
           "saveFutureSchedule",
-          "deleteSchedule",
-          "deleteFutureSchedule",
         ];
         protectedFns.forEach(function (name) {
           var original = window[name];

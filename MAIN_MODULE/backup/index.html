@@ -1096,15 +1096,16 @@
         }
       }
 
-      function updatePowerButton(state) {
+      function updatePowerButton(state, statusText) {
         currentOutputState = state;
         const btn = document.getElementById("power-toggle");
+        const extra = statusText ? " (" + statusText + ")" : "";
         if (state) {
           btn.classList.add("active");
-          btn.title = "Main Output: ON";
+          btn.title = "Main Output: ON" + extra;
         } else {
           btn.classList.remove("active");
-          btn.title = "Main Output: OFF";
+          btn.title = "Main Output: OFF" + extra;
         }
       }
 
@@ -1232,6 +1233,7 @@
             if (data.mainOutput !== undefined) {
               updatePowerButton(
                 data.mainOutput === 1 || data.mainOutput === true,
+                data.statusText,
               );
             }
 

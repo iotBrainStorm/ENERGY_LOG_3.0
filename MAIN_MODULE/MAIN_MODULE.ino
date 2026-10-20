@@ -162,6 +162,7 @@ char protectionStatusText[16] = "MAIN: ON";
 
 // Quick Countdown Timer (Volatile)
 bool quickTimerActive = false;
+bool quickTimerTurnOn = false;
 unsigned long quickTimerEndMillis = 0;
 
 // Deferred Action Flags (Safe execution outside AsyncWebServer callbacks)
@@ -369,8 +370,7 @@ void IRAM_ATTR encoderISR() {
 
 long getEncoderPos() {
   portENTER_CRITICAL(&encoderMux);
-  encoder.tick();
-  long p = encoder.getPosition();
+  long p = isrEncoderPos;  // Read ISR position directly without double-ticking
   portEXIT_CRITICAL(&encoderMux);
   return p;
 }
@@ -381,6 +381,22 @@ void setEncoderPos(long p) {
   isrEncoderPos = p;
   lastEncoderPos = p;
   portEXIT_CRITICAL(&encoderMux);
+}
+
+// 45ms settling filter: absorbs mechanical quadrature bounce so 1 click = 1 clean step
+int readEncoderStep() {
+  static unsigned long lastStepTime = 0;
+  unsigned long now = millis();
+  if (now - lastStepTime < 45UL) return 0;
+
+  long pos = getEncoderPos();
+  if (pos == lastEncoderPos) return 0;
+
+  int step = (pos > lastEncoderPos) ? 1 : -1;
+  lastEncoderPos = pos;
+  lastStepTime = now;
+  lastMenuActivityMillis = now;
+  return step;
 }
 
 bool checkEncoderButtonClick() {
@@ -614,14 +630,52 @@ void updateNtpSilently() {
   }
 }
 
+bool isProtectionRunning() {
+  if (protectionWasActive) return true;
+
+  portENTER_CRITICAL(&measureMux);
+  Measurements cur = readings;
+  portEXIT_CRITICAL(&measureMux);
+
+  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) return true;
+
+  bool anyProtEnabled = settings.highVProtec || settings.LowVProtec ||
+                        settings.highPProtec || settings.highHzProtec || settings.lowHzProtec;
+
+  // If protections are enabled but PZEM sensor is not valid, do not allow blind turn-on
+  if (anyProtEnabled && !cur.valid) return true;
+
+  if (cur.valid) {
+    if (settings.highVProtec && cur.voltage > settings.voltHigh) return true;
+    if (settings.LowVProtec && cur.voltage < settings.voltLow) return true;
+    if (settings.highPProtec && cur.power > settings.powerHigh) return true;
+    if (settings.highHzProtec && cur.frequency > settings.freqHigh) return true;
+    if (settings.lowHzProtec && cur.frequency < settings.freqLow) return true;
+  }
+  return false;
+}
+
 void checkTimersAndSchedules() {
-  // 1. Volatile Quick Countdown Timer
+  // 1. Volatile Quick Countdown Timer (Supports ON or OFF + Protection Check)
   if (quickTimerActive) {
     if ((long)(millis() - quickTimerEndMillis) >= 0) {
       quickTimerActive = false;
-      settings.mainOutput = false;
-      saveSettings();
-      triggerBeep(200, 2, 100);
+      if (quickTimerTurnOn) {
+        // Only turn ON if no protection is currently active/running
+        if (!isProtectionRunning()) {
+          settings.mainOutput = true;
+          shouldTurnOff = false;
+          saveSettings();
+          triggerBeep(200, 2, 100);
+        } else {
+          Serial.println("[Timer] Skipped ON: Protection is currently active!");
+          triggerBeep(120, 3, 80);
+        }
+      } else {
+        settings.mainOutput = false;
+        saveSettings();
+        triggerBeep(200, 2, 100);
+      }
     }
   }
 
@@ -633,35 +687,44 @@ void checkTimersAndSchedules() {
   struct tm ti;
   if (!getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) return;
 
-  // Map tm_wday (0=Sun..6=Sat) to UI index (0=Mon..6=Sun)
   int uiDay = (ti.tm_wday == 0) ? 6 : (ti.tm_wday - 1);
 
   for (int i = 0; i < MAX_DAILY_SCHEDULES; i++) {
     if (dailySchedules[i].active && (dailySchedules[i].daysMask & (1 << uiDay)) && dailySchedules[i].hour == ti.tm_hour && dailySchedules[i].minute == ti.tm_min && dailySchedules[i].lastTriggeredYDay != ti.tm_yday) {
       dailySchedules[i].lastTriggeredYDay = ti.tm_yday;
-      settings.mainOutput = dailySchedules[i].turnOn;
-      if (settings.mainOutput) {
-        protectionWasActive = false;
-        waitingForDelay = false;
+      if (dailySchedules[i].turnOn) {
+        if (!isProtectionRunning()) {
+          settings.mainOutput = true;
+          shouldTurnOff = false;
+          saveSettings();
+          triggerBeep(120, 2, 80);
+        }
+      } else {
+        settings.mainOutput = false;
+        saveSettings();
+        triggerBeep(120, 2, 80);
       }
-      saveSettings();
       saveSchedulesToNVS();
-      triggerBeep(120, 2, 80);
     }
   }
 
   bool futureChanged = false;
   for (int i = 0; i < MAX_FUTURE_SCHEDULES; i++) {
     if (futureSchedules[i].active && futureSchedules[i].year == (ti.tm_year + 1900) && futureSchedules[i].month == (ti.tm_mon + 1) && futureSchedules[i].day == ti.tm_mday && futureSchedules[i].hour == ti.tm_hour && futureSchedules[i].minute == ti.tm_min) {
-      settings.mainOutput = futureSchedules[i].turnOn;
-      if (settings.mainOutput) {
-        protectionWasActive = false;
-        waitingForDelay = false;
+      if (futureSchedules[i].turnOn) {
+        if (!isProtectionRunning()) {
+          settings.mainOutput = true;
+          shouldTurnOff = false;
+          saveSettings();
+          triggerBeep(120, 2, 80);
+        }
+      } else {
+        settings.mainOutput = false;
+        saveSettings();
+        triggerBeep(120, 2, 80);
       }
       futureSchedules[i].active = false;
       futureChanged = true;
-      saveSettings();
-      triggerBeep(120, 2, 80);
     }
   }
   if (futureChanged) saveSchedulesToNVS();
@@ -731,25 +794,7 @@ void controlMainOutput() {
 
   unsigned long protDelayMs = (unsigned long)max(10, settings.protectionDelay) * 1000UL;
 
-  // 1. Manual Output OFF
-  if (!settings.mainOutput) {
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH);
-    relayPhysicalOn = false;
-    strcpy(protectionStatusText, "MAIN: OFF");
-    return;
-  }
-
-  // 2. kWh Energy Saver Cutoff
-  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) {
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH);
-    relayPhysicalOn = false;
-    strcpy(protectionStatusText, "kWh SAVER");
-    return;
-  }
-
-  // 3. Evaluate Protection Faults (Only trip on low V / low Hz if sensor is valid)
+  // 1. Evaluate Protection Faults FIRST (Always track grid faults even if manual output is OFF)
   bool faultActive = false;
   if (cur.valid) {
     if (settings.highVProtec && cur.voltage > settings.voltHigh) faultActive = true;
@@ -772,7 +817,7 @@ void controlMainOutput() {
     return;
   }
 
-  // 4. Handle Protection Recovery Wait Timer
+  // 2. Handle Protection Recovery Wait Timer
   if (protectionWasActive) {
     if (!waitingForDelay) {
       protectionClearedTime = millis();
@@ -783,11 +828,7 @@ void controlMainOutput() {
     if (elapsed >= protDelayMs || digitalRead(RESET_BTN) == HIGH) {
       protectionWasActive = false;
       waitingForDelay = false;
-      shouldTurnOff = false;
-      digitalWrite(MAIN_RELAY, LOW);  // Engage Relay
-      relayPhysicalOn = true;
-      strcpy(protectionStatusText, "MAIN: ON");
-      triggerBeep(150, 1, 0);
+      if (settings.mainOutput) triggerBeep(150, 1, 0);
     } else {
       shouldTurnOff = true;
       digitalWrite(MAIN_RELAY, HIGH);
@@ -796,13 +837,33 @@ void controlMainOutput() {
       int mins = rem / 60000UL;
       int secs = (rem % 60000UL) / 1000UL;
       snprintf(protectionStatusText, sizeof(protectionStatusText), "Wait:%02d:%02d", mins, secs);
+      return;
     }
-  } else {
-    shouldTurnOff = false;
-    digitalWrite(MAIN_RELAY, LOW);  // Engage Relay
-    relayPhysicalOn = true;
-    strcpy(protectionStatusText, "MAIN: ON");
   }
+
+  // 3. Manual Output OFF
+  if (!settings.mainOutput) {
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "MAIN: OFF");
+    return;
+  }
+
+  // 4. kWh Energy Saver Cutoff
+  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) {
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "kWh SAVER");
+    return;
+  }
+
+  // 5. All conditions normal -> Engage Relay
+  shouldTurnOff = false;
+  digitalWrite(MAIN_RELAY, LOW);
+  relayPhysicalOn = true;
+  strcpy(protectionStatusText, "MAIN: ON");
 }
 
 // ============================================================================
@@ -907,7 +968,7 @@ void shareDataWithSecondary() {
   doc["lhp"] = settings.lowHzProtec;
 
   doc["afpc"] = settings.afpcEnabled;
-  doc["out"] = settings.mainOutput;
+  doc["out"] = relayPhysicalOn;
   doc["kwhs"] = settings.kWhSaver;
 
   espSerial.print('S');
@@ -951,7 +1012,7 @@ void sendDataToNodeRed() {
   doc["frequency"] = cur.frequency;
   doc["uptime"] = cur.uptime;
   doc["totalDays"] = cur.totalDays;  // Keep key name for InfluxDB compatibility!
-  doc["mainOutput"] = settings.mainOutput ? 1 : 0;
+  doc["mainOutput"] = relayPhysicalOn ? 1 : 0;
   doc["resetTime"] = lastResetTimeStr;  // Optional metadata
 
   String payload;
@@ -1021,7 +1082,9 @@ void setupWebServerRoutes() {
     doc["pf"] = String(cur.pf, 2);
     doc["uptime"] = String(cur.uptime, 1);
     doc["days"] = String(cur.totalDays, 1);
-    doc["mainOutput"] = settings.mainOutput ? 1 : 0;
+    doc["mainOutput"] = relayPhysicalOn ? 1 : 0;
+    doc["mainOutputSetting"] = settings.mainOutput ? 1 : 0;
+    doc["statusText"] = protectionStatusText;
     doc["resetTime"] = lastResetTimeStr;   // ADD: Send last reset timestamp
     doc["ntpSynced"] = ntpSynced ? 1 : 0;  // ADD: Send NTP sync status
 
@@ -1323,12 +1386,15 @@ void setupWebServerRoutes() {
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
+        if (doc.containsKey("enabled")) {
+          settings.nodeRedEnabled = doc["enabled"].as<bool>();
+        }
         String addr = doc["address"] | "";
         if (addr.length() > 0 && addr.length() < 31) {
           strncpy(settings.nodeRedIP, addr.c_str(), 31);
           settings.nodeRedIP[31] = '\0';
-          saveSettings();
         }
+        saveSettings();
       }
       request->send(200, "application/json", "{\"success\":true}");
     });
@@ -1409,6 +1475,7 @@ void setupWebServerRoutes() {
     doc["active"] = quickTimerActive;
     long rem = quickTimerActive ? max(0L, (long)(quickTimerEndMillis - millis()) / 1000L) : 0;
     doc["remaining"] = rem;
+    doc["action"] = quickTimerTurnOn ? "on" : "off";
     String res;
     serializeJson(doc, res);
     request->send(200, "application/json", res);
@@ -1420,8 +1487,10 @@ void setupWebServerRoutes() {
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
         unsigned long durSec = doc["duration"] | 0;
+        String action = doc["action"] | "off";
         if (durSec > 0) {
           quickTimerActive = true;
+          quickTimerTurnOn = (action == "on");
           quickTimerEndMillis = millis() + (durSec * 1000UL);
           request->send(200, "application/json", "{\"success\":true}");
           return;
@@ -1740,7 +1809,9 @@ void maintainWiFiAndServices() {
       readings.energy = 0.0f;
       readings.totalDays = 0.0f;
       portEXIT_CRITICAL(&measureMux);
-      showToastLCD("Energy Reset!", lastResetTimeStr, 1400, UI_DASHBOARD);
+      showToastLCD("Energy Reset!", "Restarting...", 1500, UI_DASHBOARD);
+      pendingRestart = true;
+      restartScheduledMillis = millis() + 1500;
     } else {
       triggerBeep(150, 2, 80);
       showToastLCD("Reset Failed!", "NTP Not Synced", 1500, UI_DASHBOARD);
@@ -1953,6 +2024,15 @@ void startFloatEditor(const char* title, float* target, float minV, float maxV, 
   uiState = UI_EDIT_FLOAT;
 }
 
+void startConfirmDialog(const char* title, void (*onYes)(), UIState returnState = UI_SUB_MENU) {
+  editCtx.title = title;
+  editCtx.confirmChoice = false;  // Default to "No" for safety
+  editCtx.onConfirm = onYes;
+  uiReturnState = returnState;
+  setEncoderPos(0);
+  uiState = UI_CONFIRM;
+}
+
 void handleSubmenuAction(int mainIdx, int subIdx) {
   switch (mainIdx) {
     case 1:  // WiFi Setup
@@ -2113,10 +2193,13 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
           triggerBeep(150, 2, 80);
           showToastLCD("NTP Not Synced!", "Sync Time First", 1500, UI_SUB_MENU);
         } else {
-          resetKwhRequested = true;
+          startConfirmDialog(
+            "Clear kWh?", []() {
+              resetKwhRequested = true;
+            },
+            UI_SUB_MENU);
         }
       } else if (subIdx == 2) {
-        // Show Last Billing Reset Timestamp & Elapsed Days on LCD
         strcpy(infoLine1, "Last Billing:");
         strncpy(infoLine2, lastResetTimeStr, 23);
         snprintf(infoLine3, 23, "Elapsed: %.1f Days", kwhDays);
@@ -2127,8 +2210,19 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
       break;
 
     case 13:  // Factory Reset
-      if (subIdx == 1) pendingFactoryData = true;
-      else if (subIdx == 2) pendingFactoryAll = true;
+      if (subIdx == 1) {
+        startConfirmDialog(
+          "Reset All Data?", []() {
+            pendingFactoryData = true;
+          },
+          UI_SUB_MENU);
+      } else if (subIdx == 2) {
+        startConfirmDialog(
+          "Factory Reset?", []() {
+            pendingFactoryAll = true;
+          },
+          UI_SUB_MENU);
+      }
       break;
   }
 }
@@ -2262,6 +2356,7 @@ void updateDisplayAndUI() {
   // 3. Toast Notification State
   if (uiState == UI_TOAST) {
     if (now >= toastEndMillis || checkEncoderButtonClick()) {
+      lastEncoderPos = getEncoderPos(); // Prevent phantom step on return
       uiState = uiReturnState;
       return;
     }
@@ -2279,6 +2374,7 @@ void updateDisplayAndUI() {
   if (uiState == UI_INFO_VIEW) {
     if (checkEncoderButtonClick()) {
       triggerBeep(40, 1, 0);
+      lastEncoderPos = getEncoderPos(); // Prevent phantom step on return
       uiState = uiReturnState;
       return;
     }
@@ -2293,14 +2389,61 @@ void updateDisplayAndUI() {
     return;
   }
 
-  // 5. Main Menu Navigation
+  // 5. Yes/No Confirmation Dialog State
+  if (uiState == UI_CONFIRM) {
+    int step = readEncoderStep();
+    if (step != 0) {
+      bool newChoice = !editCtx.confirmChoice;
+      editCtx.confirmChoice = newChoice;
+      triggerBeep(12, 1, 0);
+    }
+
+    if (checkEncoderButtonClick()) {
+      triggerBeep(45, 1, 0);
+      if (editCtx.confirmChoice && editCtx.onConfirm) {
+        editCtx.onConfirm();
+      } else {
+        showToastLCD("Action", "Cancelled", 800, uiReturnState);
+      }
+      return;
+    }
+
+    u8g2.clearBuffer();
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(8, 16, editCtx.title);
+    u8g2.drawLine(0, 20, 127, 20);
+
+    u8g2.setFont(u8g2_font_6x12_tf);
+    if (editCtx.confirmChoice) {
+      u8g2.drawBox(12, 26, 44, 16);
+      u8g2.setDrawColor(0);
+      u8g2.drawStr(24, 38, "YES");
+      u8g2.setDrawColor(1);
+      u8g2.drawFrame(72, 26, 44, 16);
+      u8g2.drawStr(88, 38, "NO");
+    } else {
+      u8g2.drawFrame(12, 26, 44, 16);
+      u8g2.drawStr(24, 38, "YES");
+      u8g2.drawBox(72, 26, 44, 16);
+      u8g2.setDrawColor(0);
+      u8g2.drawStr(88, 38, "NO");
+      u8g2.setDrawColor(1);
+    }
+    u8g2.drawStr(14, 57, "Click to confirm");
+    u8g2.sendBuffer();
+    return;
+  }
+
+  // 6. Main Menu Navigation
   if (uiState == UI_MAIN_MENU) {
-    long pos = getEncoderPos();
-    if (pos != lastEncoderPos) {
-      currentMainMenuIdx = constrain(currentMainMenuIdx + (pos > lastEncoderPos ? 1 : -1), 0, mainMenuCount - 1);
-      lastEncoderPos = pos;
-      lastMenuActivityMillis = now;
-      triggerBeep(20, 1, 0);
+    int step = readEncoderStep();
+    if (step != 0) {
+      int newIdx = constrain(currentMainMenuIdx + step, 0, mainMenuCount - 1);
+      if (newIdx != currentMainMenuIdx) {
+        currentMainMenuIdx = newIdx;
+        triggerBeep(12, 1, 0);  // Only beep if selection actually moved
+      }
     }
 
     if (checkEncoderButtonClick()) {
@@ -2313,9 +2456,13 @@ void updateDisplayAndUI() {
         showToastLCD("NTP Clock", "Sync Requested", 1200, UI_MAIN_MENU);
         return;
       } else if (currentMainMenuIdx == 14) {
-        pendingRestart = true;
-        restartScheduledMillis = millis() + 600;
-        showToastLCD("System", "Restarting...", 1000, UI_DASHBOARD);
+        startConfirmDialog(
+          "Restart ESP32?", []() {
+            pendingRestart = true;
+            restartScheduledMillis = millis() + 600;
+            showToastLCD("System", "Restarting...", 1000, UI_DASHBOARD);
+          },
+          UI_MAIN_MENU);
         return;
       } else if (currentMainMenuIdx == 15) {
         strcpy(infoLine1, "ESP Energy Log");
@@ -2411,14 +2558,15 @@ void updateDisplayAndUI() {
     return;
   }
 
-  // 6. Submenu Navigation
+  // 7. Submenu Navigation
   if (uiState == UI_SUB_MENU) {
-    long pos = getEncoderPos();
-    if (pos != lastEncoderPos) {
-      currentSubMenuIdx = constrain(currentSubMenuIdx + (pos > lastEncoderPos ? 1 : -1), 0, activeSubmenuLen - 1);
-      lastEncoderPos = pos;
-      lastMenuActivityMillis = now;
-      triggerBeep(20, 1, 0);
+    int step = readEncoderStep();
+    if (step != 0) {
+      int newIdx = constrain(currentSubMenuIdx + step, 0, activeSubmenuLen - 1);
+      if (newIdx != currentSubMenuIdx) {
+        currentSubMenuIdx = newIdx;
+        triggerBeep(12, 1, 0);  // Only beep if selection actually moved
+      }
     }
 
     if (checkEncoderButtonClick()) {
@@ -2453,14 +2601,15 @@ void updateDisplayAndUI() {
     return;
   }
 
-  // 7. Integer Value Editor
+  // 8. Integer Value Editor (No mid-rotation setEncoderPos glitch!)
   if (uiState == UI_EDIT_INT) {
-    long pos = getEncoderPos();
-    if (pos != lastEncoderPos) {
-      editCtx.intTemp = constrain(pos * editCtx.intStep, editCtx.intMin, editCtx.intMax);
-      setEncoderPos(editCtx.intTemp / editCtx.intStep);
-      lastMenuActivityMillis = now;
-      triggerBeep(15, 1, 0);
+    int step = readEncoderStep();
+    if (step != 0) {
+      int newVal = constrain(editCtx.intTemp + (step * editCtx.intStep), editCtx.intMin, editCtx.intMax);
+      if (newVal != editCtx.intTemp) {
+        editCtx.intTemp = newVal;
+        triggerBeep(10, 1, 0);
+      }
     }
     if (checkEncoderButtonClick()) {
       *editCtx.intTarget = editCtx.intTemp;
@@ -2484,17 +2633,18 @@ void updateDisplayAndUI() {
     return;
   }
 
-  // 8. Float Value Editor
+  // 9. Float Value Editor (No mid-rotation setEncoderPos glitch!)
   if (uiState == UI_EDIT_FLOAT) {
-    long pos = getEncoderPos();
-    if (pos != lastEncoderPos) {
+    int step = readEncoderStep();
+    if (step != 0) {
+      long curS = round(editCtx.floatTemp * editCtx.floatScale);
       long minS = round(editCtx.floatMin * editCtx.floatScale);
       long maxS = round(editCtx.floatMax * editCtx.floatScale);
-      long clamped = constrain(pos, minS, maxS);
-      editCtx.floatTemp = clamped / editCtx.floatScale;
-      setEncoderPos(clamped);
-      lastMenuActivityMillis = now;
-      triggerBeep(15, 1, 0);
+      long newS = constrain(curS + step, minS, maxS);
+      if (newS != curS) {
+        editCtx.floatTemp = newS / editCtx.floatScale;
+        triggerBeep(10, 1, 0);
+      }
     }
     if (checkEncoderButtonClick()) {
       *editCtx.floatTarget = editCtx.floatTemp;
@@ -2630,6 +2780,8 @@ void setup() {
   pinMode(RESET_BTN, INPUT);
   pinMode(BOOT_BTN, INPUT_PULLUP);
   pinMode(ENCODER_SW, INPUT_PULLUP);
+  pinMode(ENCODER_CLK, INPUT_PULLUP);
+  pinMode(ENCODER_DT, INPUT_PULLUP);
 
   // 2. Initialize Serial Buses (CRITICAL FIX: RX=16, TX=17 for PZEM!)
   Serial.begin(115200);
