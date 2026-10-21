@@ -124,6 +124,19 @@
         transform: scale(1) translateY(0);
       }
 
+      /* Hide scrollbar while keeping touch scrolling active */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
+      }
+
       /* Schedule Action & Day Pills */
       .day-pill.active {
         background-color: #2563eb;
@@ -212,7 +225,7 @@
       <!-- Sidebar -->
       <aside
         id="sidebar"
-        class="fixed md:sticky top-14 md:top-0 left-0 z-40 w-64 md:w-64 h-[calc(100vh-3.5rem)] md:h-screen bg-slate-900/95 border-r border-slate-800/90 flex flex-col shrink-0 -translate-x-full md:translate-x-0 transition-transform duration-200"
+        class="fixed md:sticky top-14 bottom-0 md:top-0 left-0 z-40 w-64 md:w-64 h-[calc(100dvh-3.5rem)] md:h-screen overflow-hidden bg-slate-900/95 border-r border-slate-800/90 flex flex-col shrink-0 -translate-x-full md:translate-x-0 transition-transform duration-200"
       >
         <!-- Desktop Sidebar Header -->
         <div
@@ -242,7 +255,9 @@
         </div>
 
         <!-- Navigation List -->
-        <nav class="flex-1 overflow-y-auto p-3 space-y-4">
+        <nav
+          class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 pb-10 space-y-4 no-scrollbar"
+        >
           <!-- Connection Group -->
           <div>
             <div
@@ -728,7 +743,7 @@
                 mDNS Local Domain
               </h1>
               <p class="text-xs text-slate-400 mt-0.5">
-                Access your energy monitor via a human-readable
+                Access your energy monitor via
                 <span class="font-mono text-slate-300">.local</span> address
               </p>
             </div>
@@ -754,8 +769,6 @@
                   class="font-mono font-semibold text-blue-300"
                   >energylog-XXXX.local</span
                 >
-                (where <span class="font-mono">XXXX</span> is the last 4
-                characters of the device MAC address).
               </div>
             </div>
 
@@ -763,25 +776,28 @@
               class="bg-slate-900/80 border border-slate-800/90 rounded-2xl overflow-hidden mb-5"
             >
               <div
-                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between"
+                class="px-5 py-3.5 border-b border-slate-800/80 flex items-center justify-between gap-3"
               >
                 <span
-                  class="text-xs font-semibold uppercase tracking-wider text-slate-300"
-                  >mDNS Configuration</span
+                  class="text-xs font-semibold uppercase tracking-wider text-slate-300 shrink-0"
+                  >URL</span
                 >
-                <span
+                <a
                   id="mdns-active-url"
-                  class="font-mono text-[11px] text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 rounded-md"
+                  href="http://energylog-XXXX.local"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="font-mono text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 px-2.5 py-1 rounded-md break-all text-right max-w-[75%] sm:max-w-[80%] transition-colors"
                 >
                   http://energylog-XXXX.local
-                </span>
+                </a>
               </div>
               <div class="divide-y divide-slate-800/60 px-5">
                 <!-- Enable / Disable mDNS -->
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Enable mDNS Responder
+                      Enable mDNS
                     </div>
                     <div class="text-[11px] text-slate-500">
                       Broadcast local hostname on the network
@@ -799,25 +815,25 @@
                 >
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Custom mDNS Address
+                      Custom mDNS
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Alphanumeric &amp; hyphens only (e.g.
-                      <span class="font-mono">energylog-home</span>)
+                      Alphanumeric &amp; hyphens only
                     </div>
                   </div>
+
                   <div
-                    class="flex items-center bg-slate-950 border border-slate-800 focus-within:border-blue-500 rounded-xl overflow-hidden transition-colors"
+                    class="flex items-center w-full max-w-sm bg-slate-950 border border-slate-800 focus-within:border-blue-500 rounded-xl overflow-hidden transition-colors"
                   >
                     <input
                       type="text"
                       id="mdns-hostname"
                       placeholder="energylog-XXXX"
                       oninput="updateMdnsPreview(this.value)"
-                      class="px-3.5 py-2 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 outline-none w-44 sm:w-48"
+                      class="flex-1 min-w-0 px-3.5 py-2 bg-transparent text-xs font-mono text-slate-100 placeholder-slate-600 outline-none"
                     />
                     <span
-                      class="px-3 py-2 bg-slate-900 border-l border-slate-800 text-xs font-mono text-slate-400 select-none"
+                      class="shrink-0 px-3 py-2 bg-slate-900 border-l border-slate-800 text-xs font-mono text-slate-400 select-none"
                       >.local</span
                     >
                   </div>
@@ -825,9 +841,7 @@
 
                 <!-- Default Address Reference -->
                 <div class="py-3.5 flex items-center justify-between gap-4">
-                  <span class="text-xs text-slate-400"
-                    >Default Factory Hostname</span
-                  >
+                  <span class="text-xs text-slate-400">Default Hostname</span>
                   <span
                     id="mdns-default-host"
                     class="text-xs font-mono text-slate-300"
@@ -843,13 +857,13 @@
                 onclick="saveMdnsSettings()"
                 class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
               >
-                Save Custom mDNS
+                Save
               </button>
               <button
                 onclick="resetMdnsDefault()"
                 class="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-medium transition-colors"
               >
-                Reset to Default
+                Reset
               </button>
               <button
                 onclick="
@@ -862,7 +876,7 @@
                 "
                 class="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors"
               >
-                Delete Custom mDNS
+                Delete
               </button>
             </div>
           </section>
@@ -887,7 +901,7 @@
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Enable Node-RED Streaming
+                      Enable Node-RED
                     </div>
                     <div class="text-[11px] text-slate-500">
                       Push JSON payloads to Node-RED endpoint
@@ -1840,7 +1854,7 @@
                     Startup Relay Delay
                   </div>
                   <div class="text-[11px] text-slate-500">
-                    Wait time before engaging output after power-on (0–300s)
+                    Wait time before engaging output
                   </div>
                 </div>
                 <div
@@ -1856,7 +1870,7 @@
                   />
                   <span
                     class="px-2.5 py-1.5 bg-slate-900 border-l border-slate-800 text-[11px] font-mono text-slate-400"
-                    >sec</span
+                    >s</span
                   >
                 </div>
               </div>
@@ -1900,8 +1914,7 @@
                       Reset Energy Counter
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Zero out accumulated kWh &amp; save reset timestamp
-                      (Requires NTP)
+                      Requires NTP sync
                     </div>
                   </div>
                   <button
@@ -1916,29 +1929,6 @@
                     class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors shrink-0"
                   >
                     Clear kWh
-                  </button>
-                </div>
-                <div class="py-4 flex items-center justify-between gap-4">
-                  <div>
-                    <div class="text-xs font-medium text-slate-200">
-                      Reset Last Billing Counter
-                    </div>
-                    <div class="text-[11px] text-slate-500">
-                      Restart billing elapsed days from current NTP time
-                    </div>
-                  </div>
-                  <button
-                    onclick="
-                      showConfirmModal(
-                        'clearDays',
-                        'Reset Last Billing?',
-                        'This will reset the Last Billing days counter to zero using current NTP time.',
-                        'warning',
-                      )
-                    "
-                    class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors shrink-0"
-                  >
-                    Reset Billing
                   </button>
                 </div>
               </div>
@@ -1966,10 +1956,12 @@
                       Regional offset for NTP time synchronization
                     </div>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div
+                    class="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto"
+                  >
                     <select
                       id="timezone-select"
-                      class="px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-200 outline-none"
+                      class="flex-1 sm:flex-initial min-w-0 px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs text-slate-200 outline-none"
                     >
                       <option value="-43200">BIT (UTC-12:00)</option>
                       <option value="-39600">SST (UTC-11:00)</option>
@@ -2014,7 +2006,7 @@
                     </select>
                     <button
                       onclick="saveTimezone()"
-                      class="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shrink-0"
+                      class="ml-auto sm:ml-0 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors shrink-0"
                     >
                       Save
                     </button>
@@ -2042,7 +2034,7 @@
                       Restart Controller
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Soft reboot the ESP32 microcontroller
+                      Soft reboot the ESP32
                     </div>
                   </div>
                   <button
@@ -2079,8 +2071,7 @@
                       Reset All Telemetry Data
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Permanently erase all accumulated energy &amp; runtime
-                      logs
+                      Custom parameters &amp; energy
                     </div>
                   </div>
                   <button
@@ -2103,8 +2094,7 @@
                       Factory Reset All Settings
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Restore default parameters, erase WiFi credentials, and
-                      reboot
+                      Custom parameters &amp; WiFi
                     </div>
                   </div>
                   <button
@@ -2173,7 +2163,7 @@
                 <div class="py-3.5 flex items-center justify-between">
                   <span class="text-xs text-slate-400">Developer</span>
                   <span class="text-xs font-medium text-slate-200"
-                    >M. Maity</span
+                    >M. Maity | iotBrainStorm</span
                   >
                 </div>
               </div>
@@ -2615,7 +2605,7 @@
               ESP32 System Configuration
             </div>
             <div class="text-center sm:text-right text-[11px] text-slate-500">
-              ESP32 Real-time Power Monitoring Dashboard
+              ESP32 Power Monitoring Dashboard
               <span class="mx-1 text-slate-700">|</span> Developer &copy;
               M.Maity
             </div>
@@ -2938,11 +2928,22 @@
         >
           Sign In
         </button>
+        <button
+          type="button"
+          onclick="startForgetUserFlow()"
+          class="w-full mt-2.5 py-2 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium transition-colors"
+        >
+          Forget User
+        </button>
+        <div
+          id="forget-user-status"
+          class="mt-3 p-3 rounded-xl bg-slate-950 border border-amber-500/30 text-xs font-mono text-amber-300 hidden"
+        ></div>
         <a
           href="index.html"
-          class="inline-block mt-4 text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+          class="inline-block mt-4 text-base font-bold text-slate-400 hover:text-slate-200 transition-colors"
         >
-          &larr; Return to Dashboard
+          &larr;
         </a>
       </div>
     </div>
@@ -3101,6 +3102,7 @@
           customHost && customHost.trim() !== ""
             ? customHost.replace(/\.local$/i, "").trim()
             : defaultHost;
+        const fullUrl = "http://" + activeHost + ".local";
 
         document.getElementById("mdns-default-label").textContent =
           defaultHost + ".local";
@@ -3108,8 +3110,12 @@
           defaultHost + ".local";
         document.getElementById("about-mdns").textContent =
           activeHost + ".local";
-        document.getElementById("mdns-active-url").textContent =
-          "http://" + activeHost + ".local";
+
+        const urlEl = document.getElementById("mdns-active-url");
+        if (urlEl) {
+          urlEl.textContent = fullUrl;
+          urlEl.href = fullUrl;
+        }
 
         const inputEl = document.getElementById("mdns-hostname");
         if (inputEl && !inputEl.matches(":focus")) {
@@ -3126,8 +3132,12 @@
           .replace(/[^a-zA-Z0-9-]/g, "")
           .toLowerCase();
         const host = clean || getDefaultMdnsHostname();
-        document.getElementById("mdns-active-url").textContent =
-          "http://" + host + ".local";
+        const fullUrl = "http://" + host + ".local";
+        const urlEl = document.getElementById("mdns-active-url");
+        if (urlEl) {
+          urlEl.textContent = fullUrl;
+          urlEl.href = fullUrl;
+        }
       }
 
       // Verify credentials using /users/list + default fallback
@@ -3692,17 +3702,75 @@
         }
       }
 
-      function clearDays() {
-        fetch("/data/clear-days", { method: "POST" })
+      let forgetUserPollTimer = null;
+
+      function startForgetUserFlow() {
+        const statusEl = document.getElementById("forget-user-status");
+        if (statusEl) {
+          statusEl.classList.remove("hidden");
+          statusEl.textContent =
+            "Press & hold the ESP32 BOOT button within 5s...";
+        }
+        showToast("Press & hold BOOT button within 5s!");
+
+        fetch("/users/forget-start", { method: "POST" })
           .then((r) => r.json())
           .then((d) => {
-            if (d.success) {
-              showToast("Last billing counter reset");
-            } else {
-              showToast(d.error || "NTP not synced! Reset blocked.", "error");
+            if (!d.success) {
+              if (statusEl) statusEl.textContent = "Failed to start reset.";
+              return;
+            }
+            if (forgetUserPollTimer) clearInterval(forgetUserPollTimer);
+            forgetUserPollTimer = setInterval(pollForgetUserStatus, 500);
+          })
+          .catch(() => {
+            if (statusEl) statusEl.textContent = "Connection error.";
+            showToast("Connection error", "error");
+          });
+      }
+
+      function pollForgetUserStatus() {
+        const statusEl = document.getElementById("forget-user-status");
+        fetch("/users/forget-status")
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.state === "wait_press") {
+              if (statusEl) {
+                statusEl.textContent = `Press BOOT button now! (${d.remaining}s left)`;
+              }
+            } else if (d.state === "holding") {
+              if (statusEl) {
+                statusEl.textContent = `Keep holding BOOT button... (${d.remaining}s remaining)`;
+              }
+            } else if (d.state === "done") {
+              clearInterval(forgetUserPollTimer);
+              forgetUserPollTimer = null;
+              if (statusEl) {
+                statusEl.className =
+                  "mt-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-300";
+                statusEl.textContent = "Users reset! Default: esp / 456456";
+              }
+              showToast("Users reset to default (esp / 456456)");
+              loadUsers();
+            } else if (d.state === "timeout") {
+              clearInterval(forgetUserPollTimer);
+              forgetUserPollTimer = null;
+              if (statusEl) {
+                statusEl.textContent =
+                  "Timed out! BOOT button was not pressed within 5s.";
+              }
+              showToast("Forget User timed out (5s)", "error");
+            } else if (d.state === "aborted") {
+              clearInterval(forgetUserPollTimer);
+              forgetUserPollTimer = null;
+              if (statusEl) {
+                statusEl.textContent =
+                  "Cancelled! BOOT button was released before 15s.";
+              }
+              showToast("Hold cancelled before 15s", "error");
             }
           })
-          .catch(() => showToast("Connection error", "error"));
+          .catch(() => {});
       }
 
       function factoryResetData() {
@@ -4533,7 +4601,6 @@
           "saveTimezone",
           "syncTime",
           "clearEnergy",
-          "clearDays",
           "factoryResetData",
           "factoryResetSettings",
           "restartDevice",

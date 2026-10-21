@@ -174,7 +174,6 @@ volatile bool pendingWiFiPortal = false;
 volatile bool pendingNtpSync = false;
 volatile bool pendingMdnsRestart = false;
 volatile bool resetKwhRequested = false;
-volatile bool resetDaysRequested = false;
 volatile bool pendingFactoryData = false;
 volatile bool pendingFactoryAll = false;
 
@@ -207,6 +206,19 @@ const unsigned long MENU_TIMEOUT_MS = 60000UL;
 bool bootBtnHolding = false;
 unsigned long bootBtnPressStart = 0;
 int lastBootCountdownSec = -1;
+
+// Forget User (5s window to press BOOT + 15s hold to reset users)
+enum ForgetUserState {
+  FORGET_IDLE,
+  FORGET_WAIT_PRESS,
+  FORGET_HOLDING,
+  FORGET_DONE,
+  FORGET_TIMEOUT,
+  FORGET_ABORTED
+};
+volatile ForgetUserState forgetUserState = FORGET_IDLE;
+unsigned long forgetUserTimerMillis = 0;
+int lastForgetBeepSec = -1;
 
 // Startup Safety Check State Machine
 bool startupCheckCompleted = false;
@@ -582,9 +594,59 @@ void executeFullFactoryReset() {
   ESP.restart();
 }
 
+void resetUsersToDefault() {
+  memset(users, 0, sizeof(users));
+  users[0].active = true;
+  strcpy(users[0].username, "esp");
+  strcpy(users[0].password, "456456");
+  strcpy(users[0].role, "admin");
+  saveUsers();
+}
+
 void checkBootFactoryReset() {
+  unsigned long now = millis();
+
+  // --- 1. Handle "Forget User" 5s Press Window + 15s Hold Mode ---
+  if (forgetUserState == FORGET_WAIT_PRESS) {
+    if (digitalRead(BOOT_BTN) == LOW) {
+      forgetUserState = FORGET_HOLDING;
+      forgetUserTimerMillis = now;
+      lastForgetBeepSec = -1;
+      triggerBeep(80, 1, 0);
+    } else if (now - forgetUserTimerMillis >= 5000UL) {
+      forgetUserState = FORGET_TIMEOUT;
+      triggerBeep(150, 2, 80);
+      showToastLCD("Forget User", "5s Timeout!", 1500, UI_DASHBOARD);
+    }
+    return;
+  }
+
+  if (forgetUserState == FORGET_HOLDING) {
+    if (digitalRead(BOOT_BTN) == LOW) {
+      unsigned long elapsed = now - forgetUserTimerMillis;
+      if (elapsed >= 15000UL) {
+        resetUsersToDefault();
+        forgetUserState = FORGET_DONE;
+        triggerBeep(200, 3, 100);
+        showToastLCD("Users Reset!", "esp / 456456", 2000, UI_DASHBOARD);
+      } else {
+        int remSec = 15 - (elapsed / 1000UL);
+        if (remSec != lastForgetBeepSec) {
+          lastForgetBeepSec = remSec;
+          triggerBeep(40, 1, 0);
+        }
+      }
+    } else {
+      // Released BOOT button before 15s finished
+      forgetUserState = FORGET_ABORTED;
+      triggerBeep(150, 2, 80);
+      showToastLCD("Forget User", "Hold Cancelled!", 1500, UI_DASHBOARD);
+    }
+    return;
+  }
+
+  // --- 2. Standard 5-Second BOOT Button Full Factory Reset ---
   if (digitalRead(BOOT_BTN) == LOW) {
-    unsigned long now = millis();
     if (!bootBtnHolding) {
       bootBtnHolding = true;
       bootBtnPressStart = now;
@@ -639,8 +701,7 @@ bool isProtectionRunning() {
 
   if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) return true;
 
-  bool anyProtEnabled = settings.highVProtec || settings.LowVProtec ||
-                        settings.highPProtec || settings.highHzProtec || settings.lowHzProtec;
+  bool anyProtEnabled = settings.highVProtec || settings.LowVProtec || settings.highPProtec || settings.highHzProtec || settings.lowHzProtec;
 
   // If protections are enabled but PZEM sensor is not valid, do not allow blind turn-on
   if (anyProtEnabled && !cur.valid) return true;
@@ -734,6 +795,7 @@ void checkTimersAndSchedules() {
 // PZEM-004T READING
 // ============================================================================
 void updatePzemReadings() {
+  if (resetKwhRequested || pendingFactoryData || pendingRestart) return;
   // Do not turn on or poll PZEM until setup() finishes and enables PZEM_RELAY
   digitalWrite(PZEM_RELAY, LOW);
 
@@ -1423,21 +1485,7 @@ void setupWebServerRoutes() {
 
   // Data, Time & System Maintenance Endpoints
   server.on("/data/clear-kwh", HTTP_POST, [](AsyncWebServerRequest* request) {
-    struct tm ti;
-    if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
-      request->send(400, "application/json", "{\"success\":false,\"error\":\"NTP not synced! Sync time before resetting kWh.\"}");
-      return;
-    }
     resetKwhRequested = true;
-    request->send(200, "application/json", "{\"success\":true}");
-  });
-  server.on("/data/clear-days", HTTP_POST, [](AsyncWebServerRequest* request) {
-    struct tm ti;
-    if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
-      request->send(400, "application/json", "{\"success\":false,\"error\":\"NTP not synced! Sync time before resetting billing.\"}");
-      return;
-    }
-    resetDaysRequested = true;
     request->send(200, "application/json", "{\"success\":true}");
   });
   server.on("/factory/reset-data", HTTP_POST, [](AsyncWebServerRequest* request) {
@@ -1734,6 +1782,42 @@ void setupWebServerRoutes() {
       request->send(200, "application/json", "{\"success\":true}");
     });
 
+  server.on("/users/forget-start", HTTP_POST, [](AsyncWebServerRequest* request) {
+    forgetUserState = FORGET_WAIT_PRESS;
+    forgetUserTimerMillis = millis();
+    lastForgetBeepSec = -1;
+    triggerBeep(80, 2, 60);
+    request->send(200, "application/json", "{\"success\":true}");
+  });
+
+  server.on("/users/forget-status", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<192> doc;
+    unsigned long now = millis();
+    if (forgetUserState == FORGET_WAIT_PRESS) {
+      long rem = max(0L, 5L - (long)((now - forgetUserTimerMillis) / 1000UL));
+      doc["state"] = "wait_press";
+      doc["remaining"] = rem;
+    } else if (forgetUserState == FORGET_HOLDING) {
+      long rem = max(0L, 15L - (long)((now - forgetUserTimerMillis) / 1000UL));
+      doc["state"] = "holding";
+      doc["remaining"] = rem;
+    } else if (forgetUserState == FORGET_DONE) {
+      doc["state"] = "done";
+      forgetUserState = FORGET_IDLE;
+    } else if (forgetUserState == FORGET_TIMEOUT) {
+      doc["state"] = "timeout";
+      forgetUserState = FORGET_IDLE;
+    } else if (forgetUserState == FORGET_ABORTED) {
+      doc["state"] = "aborted";
+      forgetUserState = FORGET_IDLE;
+    } else {
+      doc["state"] = "idle";
+    }
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
+
   server.begin();
   Serial.println("[WebServer] AsyncWebServer started on port 80");
 }
@@ -1803,32 +1887,40 @@ void maintainWiFiAndServices() {
 
   if (resetKwhRequested) {
     resetKwhRequested = false;
-    if (recordEnergyResetTimestamp()) {
-      pzem.resetEnergy();
-      portENTER_CRITICAL(&measureMux);
-      readings.energy = 0.0f;
-      readings.totalDays = 0.0f;
-      portEXIT_CRITICAL(&measureMux);
-      showToastLCD("Energy Reset!", "Restarting...", 1500, UI_DASHBOARD);
-      pendingRestart = true;
-      restartScheduledMillis = millis() + 1500;
-    } else {
-      triggerBeep(150, 2, 80);
-      showToastLCD("Reset Failed!", "NTP Not Synced", 1500, UI_DASHBOARD);
-    }
-  }
+    digitalWrite(PZEM_RELAY, LOW);
 
-  if (resetDaysRequested) {
-    resetDaysRequested = false;
-    if (recordEnergyResetTimestamp()) {
-      portENTER_CRITICAL(&measureMux);
-      readings.totalDays = 0.0f;
-      portEXIT_CRITICAL(&measureMux);
-      showToastLCD("Last Billing", "Reset Done!", 1200, UI_DASHBOARD);
+    bool pzemCleared = false;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      while (Serial2.available()) Serial2.read();
+      delay(200);
+      if (pzem.resetEnergy()) {
+        pzemCleared = true;
+        break;
+      }
+    }
+
+    if (!recordEnergyResetTimestamp()) {
+      lastResetEpoch = 0;
+      strcpy(lastResetTimeStr, "Not Reset");
+      preferences.putULong("rstEpoch", 0);
+      preferences.putString("rstTime", "Not Reset");
+      kwhDays = 0.0f;
+    }
+
+    portENTER_CRITICAL(&measureMux);
+    readings.energy = 0.0f;
+    readings.totalDays = 0.0f;
+    portEXIT_CRITICAL(&measureMux);
+
+    if (pzemCleared) {
+      triggerBeep(100, 1, 0);
+      showToastLCD("Energy Reset!", "Restarting...", 1500, UI_DASHBOARD);
     } else {
       triggerBeep(150, 2, 80);
-      showToastLCD("Reset Failed!", "NTP Not Synced", 1500, UI_DASHBOARD);
+      showToastLCD("PZEM Reset Err", "Check AC Input!", 1500, UI_DASHBOARD);
     }
+    pendingRestart = true;
+    restartScheduledMillis = millis() + 1500;
   }
 
   if (pendingFactoryData) {
@@ -2230,6 +2322,31 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
 void updateDisplayAndUI() {
   unsigned long now = millis();
 
+  // Forget user
+  if (forgetUserState == FORGET_WAIT_PRESS || forgetUserState == FORGET_HOLDING) {
+    u8g2.clearBuffer();
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    u8g2.drawStr(16, 18, "FORGET USER");
+    u8g2.setFont(u8g2_font_6x12_tf);
+    char cStr[24];
+    if (forgetUserState == FORGET_WAIT_PRESS) {
+      int rem = 5 - ((now - forgetUserTimerMillis) / 1000UL);
+      snprintf(cStr, sizeof(cStr), "Press BOOT in %ds", max(0, rem));
+      u8g2.drawStr(14, 40, cStr);
+    } else {
+      unsigned long elapsed = now - forgetUserTimerMillis;
+      int rem = 15 - (elapsed / 1000UL);
+      snprintf(cStr, sizeof(cStr), "Hold BOOT: %d sec", max(0, rem));
+      u8g2.drawStr(16, 38, cStr);
+      int barW = map(elapsed, 0, 15000, 0, 108);
+      u8g2.drawFrame(10, 46, 108, 8);
+      u8g2.drawBox(10, 46, constrain(barW, 0, 108), 8);
+    }
+    u8g2.sendBuffer();
+    return;
+  }
+
   // If BOOT button is held for > 500ms, override display with Factory Reset Countdown
   if (bootBtnHolding && (now - bootBtnPressStart >= 500UL)) {
     int rem = 5 - ((now - bootBtnPressStart) / 1000UL);
@@ -2356,7 +2473,7 @@ void updateDisplayAndUI() {
   // 3. Toast Notification State
   if (uiState == UI_TOAST) {
     if (now >= toastEndMillis || checkEncoderButtonClick()) {
-      lastEncoderPos = getEncoderPos(); // Prevent phantom step on return
+      lastEncoderPos = getEncoderPos();  // Prevent phantom step on return
       uiState = uiReturnState;
       return;
     }
@@ -2374,7 +2491,7 @@ void updateDisplayAndUI() {
   if (uiState == UI_INFO_VIEW) {
     if (checkEncoderButtonClick()) {
       triggerBeep(40, 1, 0);
-      lastEncoderPos = getEncoderPos(); // Prevent phantom step on return
+      lastEncoderPos = getEncoderPos();  // Prevent phantom step on return
       uiState = uiReturnState;
       return;
     }
@@ -2395,7 +2512,7 @@ void updateDisplayAndUI() {
     if (step != 0) {
       bool newChoice = !editCtx.confirmChoice;
       editCtx.confirmChoice = newChoice;
-      triggerBeep(12, 1, 0);
+      // triggerBeep(12, 1, 0);
     }
 
     if (checkEncoderButtonClick()) {
@@ -2442,7 +2559,7 @@ void updateDisplayAndUI() {
       int newIdx = constrain(currentMainMenuIdx + step, 0, mainMenuCount - 1);
       if (newIdx != currentMainMenuIdx) {
         currentMainMenuIdx = newIdx;
-        triggerBeep(12, 1, 0);  // Only beep if selection actually moved
+        // triggerBeep(12, 1, 0);  // Only beep if selection actually moved
       }
     }
 
@@ -2565,7 +2682,7 @@ void updateDisplayAndUI() {
       int newIdx = constrain(currentSubMenuIdx + step, 0, activeSubmenuLen - 1);
       if (newIdx != currentSubMenuIdx) {
         currentSubMenuIdx = newIdx;
-        triggerBeep(12, 1, 0);  // Only beep if selection actually moved
+        // triggerBeep(12, 1, 0);  // Only beep if selection actually moved
       }
     }
 
@@ -2608,7 +2725,7 @@ void updateDisplayAndUI() {
       int newVal = constrain(editCtx.intTemp + (step * editCtx.intStep), editCtx.intMin, editCtx.intMax);
       if (newVal != editCtx.intTemp) {
         editCtx.intTemp = newVal;
-        triggerBeep(10, 1, 0);
+        // triggerBeep(10, 1, 0);
       }
     }
     if (checkEncoderButtonClick()) {
@@ -2643,7 +2760,7 @@ void updateDisplayAndUI() {
       long newS = constrain(curS + step, minS, maxS);
       if (newS != curS) {
         editCtx.floatTemp = newS / editCtx.floatScale;
-        triggerBeep(10, 1, 0);
+        // triggerBeep(10, 1, 0);
       }
     }
     if (checkEncoderButtonClick()) {
