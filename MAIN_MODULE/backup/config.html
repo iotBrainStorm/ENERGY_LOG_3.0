@@ -684,7 +684,8 @@
                       Launch WiFi Portal
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Start AP "ESP.EnergyLog" to configure WiFi
+                      Start AP "EnergyLog" (192.168.4.1) for 180s to configure
+                      WiFi
                     </div>
                   </div>
                   <button
@@ -720,7 +721,7 @@
                       Forget Saved Network
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Erase stored WiFi credentials and reboot
+                      Erase stored WiFi credentials (AP starts on next restart)
                     </div>
                   </div>
                   <button
@@ -804,7 +805,11 @@
                     </div>
                   </div>
                   <label class="toggle">
-                    <input type="checkbox" id="mdns-enabled" checked />
+                    <input
+                      type="checkbox"
+                      id="mdns-enabled"
+                      onchange="updateMdnsPreview()"
+                    />
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1864,7 +1869,7 @@
                     type="number"
                     id="startup-delay"
                     value="60"
-                    min="0"
+                    min="5"
                     max="300"
                     class="w-20 px-3 py-1.5 bg-transparent text-xs font-mono text-slate-100 text-center outline-none"
                   />
@@ -2068,18 +2073,19 @@
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Reset All Telemetry Data
+                      Reset All Parameters &amp; Data
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Custom parameters &amp; energy
+                      Restore default parameters, schedules &amp; kWh (Hold BOOT
+                      15s)
                     </div>
                   </div>
                   <button
                     onclick="
                       showConfirmModal(
                         'factoryResetData',
-                        'Reset ALL Data?',
-                        'This will clear all counters and measurements. This action cannot be undone.',
+                        'Reset Parameters & Data?',
+                        'After confirming, press & hold the ESP32 BOOT button within 5s for 15 seconds to reset all parameters, thresholds, schedules, and energy counters to default (keeps WiFi & users).',
                         'danger',
                       )
                     "
@@ -2094,7 +2100,7 @@
                       Factory Reset All Settings
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Custom parameters &amp; WiFi
+                      Custom parameters &amp; WiFi (Hold BOOT 15s)
                     </div>
                   </div>
                   <button
@@ -2102,7 +2108,7 @@
                       showConfirmModal(
                         'factoryResetSettings',
                         'Factory Reset Settings?',
-                        'This will restore all settings to factory defaults and remove WiFi credentials.',
+                        'After confirming, press & hold the ESP32 BOOT button within 5s for 15 seconds to restore factory defaults.',
                         'danger',
                       )
                     "
@@ -2110,6 +2116,13 @@
                   >
                     Factory Reset
                   </button>
+                </div>
+                <!-- Live 5s Press + 15s Hold Status Banner -->
+                <div id="factory-reset-status-wrap" class="py-3 hidden">
+                  <div
+                    id="factory-reset-status"
+                    class="p-3 rounded-xl bg-slate-950 border border-amber-500/30 text-xs font-mono text-amber-300"
+                  ></div>
                 </div>
               </div>
             </div>
@@ -3096,25 +3109,48 @@
         return "energylog-" + macSuffix;
       }
 
-      function updateMdnsUI(customHost) {
+      function updateMdnsUI(customHost, isEnabled) {
         const defaultHost = getDefaultMdnsHostname();
-        const activeHost =
-          customHost && customHost.trim() !== ""
-            ? customHost.replace(/\.local$/i, "").trim()
-            : defaultHost;
+        const enabledCheckbox = document.getElementById("mdns-enabled");
+        const enabled =
+          isEnabled !== undefined
+            ? !!isEnabled
+            : enabledCheckbox
+              ? enabledCheckbox.checked
+              : false;
+
+        const cleanCustom =
+          customHost !== undefined && customHost !== null
+            ? String(customHost)
+                .replace(/\.local$/i, "")
+                .trim()
+            : "";
+        const activeHost = cleanCustom !== "" ? cleanCustom : defaultHost;
         const fullUrl = "http://" + activeHost + ".local";
 
         document.getElementById("mdns-default-label").textContent =
           defaultHost + ".local";
         document.getElementById("mdns-default-host").textContent =
           defaultHost + ".local";
-        document.getElementById("about-mdns").textContent =
-          activeHost + ".local";
+        document.getElementById("about-mdns").textContent = enabled
+          ? activeHost + ".local"
+          : defaultHost + ".local (OFF)";
 
         const urlEl = document.getElementById("mdns-active-url");
         if (urlEl) {
-          urlEl.textContent = fullUrl;
-          urlEl.href = fullUrl;
+          if (enabled) {
+            urlEl.textContent = fullUrl;
+            urlEl.href = fullUrl;
+            urlEl.className =
+              "font-mono text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 px-2.5 py-1 rounded-md break-all text-right max-w-[75%] sm:max-w-[80%] transition-colors";
+            urlEl.style.pointerEvents = "auto";
+          } else {
+            urlEl.textContent = "Disabled (" + activeHost + ".local)";
+            urlEl.removeAttribute("href");
+            urlEl.className =
+              "font-mono text-[11px] text-slate-500 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-md break-all text-right max-w-[75%] sm:max-w-[80%] cursor-default";
+            urlEl.style.pointerEvents = "none";
+          }
         }
 
         const inputEl = document.getElementById("mdns-hostname");
@@ -3127,17 +3163,14 @@
       }
 
       function updateMdnsPreview(val) {
-        const clean = val
+        const inputEl = document.getElementById("mdns-hostname");
+        const raw = val !== undefined ? val : inputEl ? inputEl.value : "";
+        const clean = raw
           .replace(/\.local$/i, "")
           .replace(/[^a-zA-Z0-9-]/g, "")
           .toLowerCase();
-        const host = clean || getDefaultMdnsHostname();
-        const fullUrl = "http://" + host + ".local";
-        const urlEl = document.getElementById("mdns-active-url");
-        if (urlEl) {
-          urlEl.textContent = fullUrl;
-          urlEl.href = fullUrl;
-        }
+        const enabled = document.getElementById("mdns-enabled").checked;
+        updateMdnsUI(clean || getDefaultMdnsHostname(), enabled);
       }
 
       // Verify credentials using /users/list + default fallback
@@ -3201,14 +3234,26 @@
               })
               .catch(() => {});
 
-            // Real-time sync for Main Output toggle on config.html
+            // Real-time sync for Main Output setting (paused while editing output section or verifying admin)
             setInterval(() => {
+              const outputSectionActive = document
+                .getElementById("section-output")
+                .classList.contains("active");
+              const adminModalActive = document
+                .getElementById("admin-verify-modal")
+                .classList.contains("active");
+              if (outputSectionActive || adminModalActive) return;
+
               fetch("/sensor.json")
                 .then((r) => r.json())
                 .then((s) => {
                   const outEl = document.getElementById("main-output");
-                  if (outEl && s.mainOutput !== undefined) {
-                    outEl.checked = s.mainOutput === 1 || s.mainOutput === true;
+                  const settingVal =
+                    s.mainOutputSetting !== undefined
+                      ? s.mainOutputSetting
+                      : s.mainOutput;
+                  if (outEl && settingVal !== undefined) {
+                    outEl.checked = settingVal === 1 || settingVal === true;
                   }
                 })
                 .catch(() => {});
@@ -3325,11 +3370,10 @@
         // MAC suffix & mDNS
         if (settings.mac) deriveMacSuffix(settings.mac);
         if (settings.macSuffix) deriveMacSuffix(settings.macSuffix);
-        setCheckbox(
-          "mdns-enabled",
-          settings.mdnsEnabled !== undefined ? settings.mdnsEnabled : true,
-        );
-        updateMdnsUI(settings.mdnsHostname || settings.mdns);
+        const mdnsOn =
+          settings.mdnsEnabled !== undefined ? !!settings.mdnsEnabled : false;
+        setCheckbox("mdns-enabled", mdnsOn);
+        updateMdnsUI(settings.mdnsHostname || settings.mdns, mdnsOn);
 
         // Main Output & AFPC
         setCheckbox("main-output", settings.mainOutput);
@@ -3477,11 +3521,11 @@
         rawHost = rawHost
           .replace(/\.local$/i, "")
           .replace(/[^a-zA-Z0-9-]/g, "")
+          .replace(/^-+|-+$/g, "")
           .toLowerCase();
 
         if (!rawHost) {
-          showToast("Please enter a valid mDNS hostname", "error");
-          return;
+          rawHost = getDefaultMdnsHostname();
         }
 
         fetch("/mdns/save", {
@@ -3492,65 +3536,82 @@
           .then((r) => r.json())
           .then((d) => {
             if (d.success) {
-              settings.mdnsHostname = rawHost;
-              updateMdnsUI(rawHost);
-              showToast("mDNS updated to " + rawHost + ".local");
+              const savedHost = d.hostname || rawHost;
+              const savedEn = d.enabled !== undefined ? d.enabled : enabled;
+              settings.mdnsHostname = savedHost;
+              settings.mdnsEnabled = savedEn;
+              setCheckbox("mdns-enabled", savedEn);
+              document.getElementById("mdns-hostname").value = savedHost;
+              updateMdnsUI(savedHost, savedEn);
+              showToast(
+                savedEn
+                  ? "mDNS saved: http://" + savedHost + ".local"
+                  : "mDNS responder disabled",
+              );
             } else {
               showToast(d.error || "Failed to save mDNS", "error");
             }
           })
-          .catch(() => {
-            // Fallback to generic setting endpoint if /mdns/save is handled via /setting/set
-            _doSaveSetting("mdnsHostname", rawHost);
-            updateMdnsUI(rawHost);
-          });
+          .catch(() => showToast("Connection error", "error"));
       }
 
       function resetMdnsDefault() {
         const defaultHost = getDefaultMdnsHostname();
-        document.getElementById("mdns-hostname").value = defaultHost;
-        document.getElementById("mdns-enabled").checked = true;
-        updateMdnsUI(defaultHost);
-
-        fetch("/mdns/reset", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ hostname: defaultHost, enabled: true }),
-        })
+        fetch("/mdns/reset", { method: "POST" })
           .then((r) => r.json())
           .then((d) => {
-            showToast(
-              d.success ? "Reset to " + defaultHost + ".local" : "Failed",
-              d.success ? "success" : "error",
-            );
+            if (d.success) {
+              const savedHost = d.hostname || defaultHost;
+              settings.mdnsHostname = savedHost;
+              settings.mdnsEnabled = true;
+              setCheckbox("mdns-enabled", true);
+              document.getElementById("mdns-hostname").value = savedHost;
+              updateMdnsUI(savedHost, true);
+              showToast("mDNS reset to http://" + savedHost + ".local");
+            } else {
+              showToast("Failed to reset mDNS", "error");
+            }
           })
-          .catch(() => {
-            _doSaveSetting("mdnsHostname", defaultHost);
-            showToast("Reset to " + defaultHost + ".local");
-          });
+          .catch(() => showToast("Connection error", "error"));
       }
 
       function deleteMdns() {
+        const defaultHost = getDefaultMdnsHostname();
         fetch("/mdns/delete", { method: "POST" })
           .then((r) => r.json())
           .then((d) => {
-            document.getElementById("mdns-hostname").value = "";
-            document.getElementById("mdns-enabled").checked = false;
-            settings.mdnsHostname = "";
-            updateMdnsUI("");
-            showToast(
-              d.success ? "Custom mDNS deleted" : "Deleted custom mDNS",
-            );
+            if (d.success) {
+              settings.mdnsHostname = d.hostname || defaultHost;
+              settings.mdnsEnabled = false;
+              setCheckbox("mdns-enabled", false);
+              document.getElementById("mdns-hostname").value = "";
+              updateMdnsUI(defaultHost, false);
+              showToast("Custom mDNS deleted & responder disabled");
+            } else {
+              showToast("Failed to delete mDNS", "error");
+            }
           })
-          .catch(() => {
-            document.getElementById("mdns-hostname").value = "";
-            document.getElementById("mdns-enabled").checked = false;
-            _doSaveSetting("mdnsHostname", "");
-            updateMdnsUI("");
-          });
+          .catch(() => showToast("Connection error", "error"));
       }
 
       // WiFi functions
+      function connectWiFi() {
+        showConfirmModal(
+          "info",
+          "Launch WiFi Portal?",
+          "This will temporarily open AP 'EnergyLog' (192.168.4.1) for 180 seconds to configure WiFi.",
+          () => {
+            requireAdmin(() => {
+              fetch("/wifi/connect", { method: "POST" })
+                .then(() => {
+                  showToast("AP 'EnergyLog' (192.168.4.1) opened for 180s");
+                })
+                .catch(() => showToast("Failed to start portal", "error"));
+            });
+          },
+        );
+      }
+
       function disconnectWiFi() {
         showConfirmModal(
           "warning",
@@ -3569,18 +3630,31 @@
         );
       }
 
-      function disconnectWiFi() {
+      function forgetWiFi() {
         showConfirmModal(
-          "warning",
-          "Disconnect WiFi?",
-          "Disconnect from the current wireless network?",
+          "danger",
+          "Forget WiFi Network?",
+          "This will erase saved WiFi credentials from memory. On the next device restart, AP 'EnergyLog' (192.168.4.1) will start automatically.",
           () => {
-            fetch("/wifi/disconnect", { method: "POST" })
-              .then(() => {
-                showToast("Disconnected");
-                updateWiFiStatus();
-              })
-              .catch(() => showToast("Failed", "error"));
+            requireAdmin(() => {
+              fetch("/wifi/forget", { method: "POST" })
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.success) {
+                    showToast(
+                      "WiFi credentials erased. Restart device to launch AP.",
+                    );
+                    setTimeout(updateWiFiStatus, 600);
+                  } else {
+                    showToast("Failed to erase WiFi", "error");
+                  }
+                })
+                .catch(() => {
+                  // Expected if browser was connected over the WiFi session that just dropped
+                  showToast("WiFi credentials erased & session disconnected.");
+                  setTimeout(updateWiFiStatus, 600);
+                });
+            });
           },
         );
       }
@@ -3773,16 +3847,144 @@
           .catch(() => {});
       }
 
+      let factoryHoldPollTimer = null;
+
+      function startFactoryHoldPoll(actionLabel, isFullFactory) {
+        const wrapEl = document.getElementById("factory-reset-status-wrap");
+        const statusEl = document.getElementById("factory-reset-status");
+        if (wrapEl && statusEl) {
+          wrapEl.classList.remove("hidden");
+          statusEl.className =
+            "p-3 rounded-xl bg-slate-950 border border-amber-500/30 text-xs font-mono text-amber-300";
+          statusEl.textContent = `${actionLabel}: Press & hold ESP32 BOOT button within 5s...`;
+        }
+        showToast("Press & hold ESP32 BOOT button within 5s!");
+
+        if (factoryHoldPollTimer) clearInterval(factoryHoldPollTimer);
+        factoryHoldPollTimer = setInterval(() => {
+          fetch("/factory/reset-status")
+            .then((r) => r.json())
+            .then((d) => {
+              if (d.state === "wait_press") {
+                if (statusEl) {
+                  statusEl.textContent = `${actionLabel}: Press BOOT button now! (${d.remaining}s left)`;
+                }
+              } else if (d.state === "holding") {
+                if (statusEl) {
+                  statusEl.textContent = `${actionLabel}: Keep holding BOOT button... (${d.remaining}s remaining)`;
+                }
+              } else if (d.state === "done") {
+                clearInterval(factoryHoldPollTimer);
+                factoryHoldPollTimer = null;
+                if (statusEl) {
+                  statusEl.className =
+                    "p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-300";
+                  statusEl.textContent = isFullFactory
+                    ? "Factory Reset complete! Rebooting into AP 'EnergyLog' (192.168.4.1)..."
+                    : "All parameters, schedules & energy counters reset! Rebooting controller...";
+                }
+                showToast(
+                  isFullFactory
+                    ? "Factory Reset complete! Restarting..."
+                    : "All parameters & data reset! Restarting...",
+                );
+                showRestartModal(60);
+              } else if (d.state === "timeout") {
+                clearInterval(factoryHoldPollTimer);
+                factoryHoldPollTimer = null;
+                if (statusEl) {
+                  statusEl.className =
+                    "p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs font-mono text-rose-400";
+                  statusEl.textContent =
+                    "Timed out! BOOT button was not pressed within 5s.";
+                }
+                showToast("Reset timed out (5s)", "error");
+              } else if (d.state === "aborted") {
+                clearInterval(factoryHoldPollTimer);
+                factoryHoldPollTimer = null;
+                if (statusEl) {
+                  statusEl.className =
+                    "p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs font-mono text-rose-400";
+                  statusEl.textContent =
+                    "Cancelled! BOOT button was released before 15s.";
+                }
+                showToast("Hold cancelled before 15s", "error");
+              }
+            })
+            .catch(() => {});
+        }, 500);
+      }
+
       function factoryResetData() {
         fetch("/factory/reset-data", { method: "POST" })
-          .then(() => showToast("Data reset complete"))
-          .catch(() => showToast("Failed", "error"));
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              startFactoryHoldPoll("Reset Data", false);
+            } else {
+              showToast("Failed to start data reset", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
       }
+
+      function factoryResetSettings() {
+        fetch("/factory/reset-settings", { method: "POST" })
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.success) {
+              startFactoryHoldPoll("Factory Reset", true);
+            } else {
+              showToast("Failed to start factory reset", "error");
+            }
+          })
+          .catch(() => showToast("Connection error", "error"));
+      }
+
+      let ntpPollTimer = null;
 
       function syncTime() {
         fetch("/time/sync", { method: "POST" })
-          .then(() => showToast("Time synchronized"))
-          .catch(() => showToast("Failed", "error"));
+          .then((r) => r.json())
+          .then((d) => {
+            if (!d.success) {
+              showToast(d.error || "Time sync failed!", "error");
+              return;
+            }
+            showToast("Synchronizing clock with NTP server...");
+            if (ntpPollTimer) clearInterval(ntpPollTimer);
+            let attempts = 0;
+            ntpPollTimer = setInterval(() => {
+              attempts++;
+              fetch("/time/sync-status")
+                .then((r) => r.json())
+                .then((st) => {
+                  if (st.state === "success") {
+                    clearInterval(ntpPollTimer);
+                    ntpPollTimer = null;
+                    showToast(
+                      "Time updated: " + (st.time || "Synchronized"),
+                      "success",
+                    );
+                  } else if (st.state === "failed" || attempts >= 14) {
+                    clearInterval(ntpPollTimer);
+                    ntpPollTimer = null;
+                    showToast(
+                      st.error || "NTP sync failed! Check internet connection.",
+                      "error",
+                    );
+                  }
+                })
+                .catch(() => {
+                  if (attempts >= 14) {
+                    clearInterval(ntpPollTimer);
+                    ntpPollTimer = null;
+                    showToast("Time sync failed (connection lost)", "error");
+                  }
+                });
+            }, 500);
+          })
+          .catch(() => showToast("Connection error", "error"));
       }
 
       let restartTimerId = null;
@@ -3871,33 +4073,6 @@
             }
           })
           .catch(() => showToast("Connection error", "error"));
-      }
-
-      function forgetWiFi() {
-        showConfirmModal(
-          "danger",
-          "Forget WiFi Network?",
-          "This will remove saved WiFi credentials and restart the device.",
-          () => {
-            requireAdmin(() => {
-              fetch("/wifi/forget", { method: "POST" })
-                .then(() => {
-                  showToast("WiFi credentials cleared. Restarting...");
-                  showRestartModal(60);
-                })
-                .catch(() => showToast("Failed", "error"));
-            });
-          },
-        );
-      }
-
-      function factoryResetSettings() {
-        fetch("/factory/reset-settings", { method: "POST" })
-          .then(() => {
-            showToast("Settings restored. Restarting...");
-            showRestartModal(60);
-          })
-          .catch(() => showToast("Failed", "error"));
       }
 
       function restartDevice() {
@@ -4064,6 +4239,22 @@
           afpcLowWatt: parseInt(document.getElementById("afpc-low").value),
           afpcHighWatt: parseInt(document.getElementById("afpc-high").value),
         };
+        if (data.voltLow >= data.voltHigh) {
+          showToast("Low Voltage must be less than High Voltage", "error");
+          return;
+        }
+        if (data.powerLow >= data.powerHigh) {
+          showToast("Low Power must be less than High Power", "error");
+          return;
+        }
+        if (data.freqLow >= data.freqHigh) {
+          showToast("Low Frequency must be less than High Frequency", "error");
+          return;
+        }
+        if (data.afpcLowWatt >= data.afpcHighWatt) {
+          showToast("AFPC Low Watt must be less than AFPC High Watt", "error");
+          return;
+        }
         fetch("/thresholds/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -4072,7 +4263,7 @@
           .then((r) => r.json())
           .then((d) =>
             showToast(
-              d.success ? "Thresholds saved" : "Failed",
+              d.success ? "Thresholds saved" : d.error || "Failed",
               d.success ? "success" : "error",
             ),
           )

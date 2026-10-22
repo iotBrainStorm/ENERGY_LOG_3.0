@@ -1127,6 +1127,7 @@
       setInterval(updateDateTime, 1000);
 
       function showPowerConfirm() {
+        intendedOutputState = !currentOutputState;
         const modal = document.getElementById("power-confirm-modal");
         const title = document.getElementById("confirm-title");
         const desc = document.getElementById("confirm-desc");
@@ -1159,9 +1160,9 @@
       }
 
       function confirmPowerAction() {
+        const newState = intendedOutputState;
         closePowerConfirm();
         requireAdmin(function () {
-          const newState = !currentOutputState;
           fetch("/output/set", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

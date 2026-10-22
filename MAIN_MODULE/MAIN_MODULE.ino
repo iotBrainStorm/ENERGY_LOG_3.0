@@ -13,6 +13,8 @@
 #include <PZEM004Tv30.h>
 #include <ArduinoJson.h>
 #include "time.h"
+#include <esp_wifi.h>
+#include <esp_sntp.h>
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -152,6 +154,17 @@ const char* ntpServer = "pool.ntp.org";
 bool ntpSynced = false;
 unsigned long lastNtpSyncMillis = 0;
 
+// Manual NTP Sync Status Tracking (Web UI & LCD)
+enum NtpSyncReqState {
+  NTP_REQ_IDLE = 0,
+  NTP_REQ_SYNCING,
+  NTP_REQ_SUCCESS,
+  NTP_REQ_FAILED
+};
+volatile NtpSyncReqState ntpReqState = NTP_REQ_IDLE;
+volatile bool ntpReqFromLCD = false;
+unsigned long ntpReqStartMillis = 0;
+
 // Relay & Protection States
 bool relayPhysicalOn = false;
 bool shouldTurnOff = false;
@@ -207,7 +220,8 @@ bool bootBtnHolding = false;
 unsigned long bootBtnPressStart = 0;
 int lastBootCountdownSec = -1;
 
-// Forget User (5s window to press BOOT + 15s hold to reset users)
+// Physical BOOT Button Guard (5s window to press BOOT + 15s hold)
+// Shared by: Forget User, Reset Data, and Factory Reset
 enum ForgetUserState {
   FORGET_IDLE,
   FORGET_WAIT_PRESS,
@@ -216,9 +230,19 @@ enum ForgetUserState {
   FORGET_TIMEOUT,
   FORGET_ABORTED
 };
+
+enum HoldResetTarget {
+  HOLD_TARGET_NONE = 0,
+  HOLD_TARGET_USERS,
+  HOLD_TARGET_DATA,
+  HOLD_TARGET_FACTORY
+};
+
 volatile ForgetUserState forgetUserState = FORGET_IDLE;
+volatile HoldResetTarget holdResetTarget = HOLD_TARGET_NONE;
 unsigned long forgetUserTimerMillis = 0;
 int lastForgetBeepSec = -1;
+bool manualWiFiDisconnected = false;
 
 // Startup Safety Check State Machine
 bool startupCheckCompleted = false;
@@ -439,11 +463,12 @@ void applyDefaultSettings() {
   settings.magic = SETTINGS_MAGIC;
   settings.nodeRedEnabled = false;
   strcpy(settings.nodeRedIP, "192.168.1.100:1880");
-  settings.mdnsEnabled = true;
+  settings.mdnsEnabled = false;  // Default: mDNS OFF
   strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
   settings.mdnsHostname[31] = '\0';
   settings.gmtOffset = 19800;  // IST UTC+5:30
 
+  // All Safety Alerts OFF
   settings.highVoltageAlert = false;
   settings.lowVoltageAlert = false;
   settings.highPowerAlert = false;
@@ -451,17 +476,20 @@ void applyDefaultSettings() {
   settings.highFreqAlert = false;
   settings.lowFreqAlert = false;
 
+  // All Safety Protections OFF
   settings.highVProtec = false;
   settings.LowVProtec = false;
   settings.highPProtec = false;
   settings.highHzProtec = false;
   settings.lowHzProtec = false;
 
+  // Features: Main Output ON, kWh Saver OFF, AFPC OFF
   settings.afpcEnabled = false;
   settings.mainOutput = true;
   settings.kWhSaver = false;
   settings.buzzerEnabled = true;
 
+  // Default Thresholds
   settings.voltHigh = 250.0f;
   settings.voltLow = 180.0f;
   settings.powerHigh = 3000.0f;
@@ -474,7 +502,8 @@ void applyDefaultSettings() {
   settings.afpcLowWatt = 50;
   settings.afpcHighWatt = 3000;
 
-  settings.startupTime = 15;
+  // Default Intervals & Startup Delay (60s)
+  settings.startupTime = 60;
   settings.espShareInterval = 2;
   settings.nodeRedInterval = 5;
   settings.pzemInterval = 1;
@@ -493,16 +522,18 @@ void loadSettings() {
     if (settings.magic != SETTINGS_MAGIC) {
       applyDefaultSettings();
       saveSettings();
+      preferences.putBool("needAP", true);  // First-time start -> launch AP
     }
   } else {
     applyDefaultSettings();
     saveSettings();
+    preferences.putBool("needAP", true);  // First-time start -> launch AP
   }
   if (strlen(settings.mdnsHostname) == 0) {
     strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
   }
   if (settings.startupTime < 5) {
-    settings.startupTime = 15;  // Ensure startup safety check always runs
+    settings.startupTime = 60;  // Ensure startup safety check always runs
   }
 }
 
@@ -568,30 +599,44 @@ bool recordEnergyResetTimestamp() {
 }
 
 // ============================================================================
-// 5-SECOND BOOT BUTTON FACTORY RESET
+// PHYSICAL BOOT BUTTON GUARD & RESET ENGINE (5s PRESS + 15s HOLD)
 // ============================================================================
-void executeFullFactoryReset() {
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_7x14B_tr);
-  u8g2.drawStr(10, 28, "FACTORY RESET!");
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(14, 46, "Formatting NVS...");
-  u8g2.sendBuffer();
+const char* getHoldTargetTitle() {
+  if (holdResetTarget == HOLD_TARGET_DATA) return "RESET ALL DATA";
+  if (holdResetTarget == HOLD_TARGET_FACTORY) return "FACTORY RESET";
+  return "FORGET USER";
+}
 
-  digitalWrite(MAIN_RELAY, HIGH);  // Safe state: Relay OFF
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(800);
-  digitalWrite(BUZZER_PIN, LOW);
+void startHoldResetFlow(HoldResetTarget target) {
+  holdResetTarget = target;
+  forgetUserState = FORGET_WAIT_PRESS;
+  forgetUserTimerMillis = millis();
+  lastForgetBeepSec = -1;
+  triggerBeep(80, 2, 60);
+}
 
-  preferences.clear();
-  applyDefaultSettings();
-  saveSettings();
-  kwhDays = 0.0f;
-  lastResetEpoch = 0;
-  strcpy(lastResetTimeStr, "Not Reset");
-
-  WiFi.disconnect(true, true);
+void performSafeRestart() {
+  digitalWrite(MAIN_RELAY, HIGH);  // Safe state: disengage load relay
+  relayPhysicalOn = false;
+  digitalWrite(PZEM_RELAY, HIGH);  // Power down PZEM sensor cleanly
+  digitalWrite(BUZZER_PIN, LOW);   // Silence buzzer
+  server.end();                    // Close open HTTP connections
+  MDNS.end();
+  preferences.end();
+  delay(150);
   ESP.restart();
+}
+
+void eraseWiFiCredentialsNVS() {
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(true);
+  WiFi.setAutoReconnect(false);
+  WiFiManager wm;
+  wm.resetSettings();
+  WiFi.disconnect(false, true);  // Wipe SSID/Pass from NVS
+  esp_wifi_restore();            // Ensure ESP-IDF WiFi NVS is completely cleared
+  WiFi.disconnect(true, true);
+  preferences.putBool("needAP", true);
 }
 
 void resetUsersToDefault() {
@@ -603,10 +648,118 @@ void resetUsersToDefault() {
   saveUsers();
 }
 
+// Helper to reliably clear PZEM energy counter
+bool clearPzemEnergyReliable() {
+  digitalWrite(PZEM_RELAY, LOW);
+  for (int attempt = 0; attempt < 5; attempt++) {
+    while (Serial2.available()) Serial2.read();
+    delay(150);
+    if (pzem.resetEnergy()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void executeDataReset() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setDrawColor(0);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(22, 11, "RESET ALL DATA");
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(10, 34, "Restoring Defaults");
+  u8g2.drawStr(18, 50, "Rebooting System...");
+  u8g2.sendBuffer();
+
+  digitalWrite(MAIN_RELAY, HIGH);  // Safe state: Relay OFF immediately
+  relayPhysicalOn = false;
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(600);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  applyDefaultSettings();
+  saveSettings();
+
+  // Clear all Daily & Future Schedules
+  memset(dailySchedules, 0, sizeof(dailySchedules));
+  memset(futureSchedules, 0, sizeof(futureSchedules));
+  saveSchedulesToNVS();
+
+  // Clear PZEM energy & billing counters reliably
+  clearPzemEnergyReliable();
+  if (ntpSynced) {
+    recordEnergyResetTimestamp();
+  } else {
+    lastResetEpoch = 0;
+    strcpy(lastResetTimeStr, "Not Reset");
+    preferences.putULong("rstEpoch", 0);
+    preferences.putString("rstTime", "Not Reset");
+    kwhDays = 0.0f;
+  }
+
+  portENTER_CRITICAL(&measureMux);
+  readings.energy = 0.0f;
+  readings.totalDays = 0.0f;
+  portEXIT_CRITICAL(&measureMux);
+
+  delay(200);
+  performSafeRestart();
+}
+
+void executeFullFactoryReset() {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setDrawColor(0);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(22, 11, "FACTORY RESET");
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(10, 34, "Restoring Defaults");
+  u8g2.drawStr(18, 50, "Rebooting System...");
+  u8g2.sendBuffer();
+
+  digitalWrite(MAIN_RELAY, HIGH);  // Safe state: Relay OFF immediately
+  relayPhysicalOn = false;
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(800);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Clear PZEM energy counter reliably
+  clearPzemEnergyReliable();
+
+  // Clear all NVS keys & restore default settings, users, and empty schedules
+  preferences.clear();
+  applyDefaultSettings();
+  saveSettings();
+  resetUsersToDefault();
+
+  memset(dailySchedules, 0, sizeof(dailySchedules));
+  memset(futureSchedules, 0, sizeof(futureSchedules));
+  saveSchedulesToNVS();
+
+  kwhDays = 0.0f;
+  lastResetEpoch = 0;
+  strcpy(lastResetTimeStr, "Not Reset");
+  preferences.putULong("rstEpoch", 0);
+  preferences.putString("rstTime", "Not Reset");
+
+  // Erase WiFi credentials & flag 'EnergyLog' AP on boot
+  eraseWiFiCredentialsNVS();
+
+  delay(200);
+  performSafeRestart();
+}
+
 void checkBootFactoryReset() {
+  if (forgetUserState != FORGET_WAIT_PRESS && forgetUserState != FORGET_HOLDING) {
+    return;
+  }
+
   unsigned long now = millis();
 
-  // --- 1. Handle "Forget User" 5s Press Window + 15s Hold Mode ---
+  // --- Phase 1: 5s Window to Press BOOT ---
   if (forgetUserState == FORGET_WAIT_PRESS) {
     if (digitalRead(BOOT_BTN) == LOW) {
       forgetUserState = FORGET_HOLDING;
@@ -616,19 +769,31 @@ void checkBootFactoryReset() {
     } else if (now - forgetUserTimerMillis >= 5000UL) {
       forgetUserState = FORGET_TIMEOUT;
       triggerBeep(150, 2, 80);
-      showToastLCD("Forget User", "5s Timeout!", 1500, UI_DASHBOARD);
+      showToastLCD(getHoldTargetTitle(), "5s Timeout!", 1500, UI_DASHBOARD);
     }
     return;
   }
 
+  // --- Phase 2: 15s Continuous Hold ---
   if (forgetUserState == FORGET_HOLDING) {
     if (digitalRead(BOOT_BTN) == LOW) {
       unsigned long elapsed = now - forgetUserTimerMillis;
       if (elapsed >= 15000UL) {
-        resetUsersToDefault();
         forgetUserState = FORGET_DONE;
         triggerBeep(200, 3, 100);
-        showToastLCD("Users Reset!", "esp / 456456", 2000, UI_DASHBOARD);
+
+        if (holdResetTarget == HOLD_TARGET_USERS) {
+          resetUsersToDefault();
+          showToastLCD("Users Reset", "esp / 456456", 2000, UI_DASHBOARD);
+        } else if (holdResetTarget == HOLD_TARGET_DATA) {
+          pendingFactoryData = true;
+          restartScheduledMillis = now + 1000;  // Allow Web UI 500ms poll to catch "done"
+          showToastLCD("Data Reset", "Rebooting...", 1500, UI_DASHBOARD);
+        } else if (holdResetTarget == HOLD_TARGET_FACTORY) {
+          pendingFactoryAll = true;
+          restartScheduledMillis = now + 1000;  // Allow Web UI 500ms poll to catch "done"
+          showToastLCD("Factory Reset", "Rebooting...", 1500, UI_DASHBOARD);
+        }
       } else {
         int remSec = 15 - (elapsed / 1000UL);
         if (remSec != lastForgetBeepSec) {
@@ -637,35 +802,10 @@ void checkBootFactoryReset() {
         }
       }
     } else {
-      // Released BOOT button before 15s finished
       forgetUserState = FORGET_ABORTED;
       triggerBeep(150, 2, 80);
-      showToastLCD("Forget User", "Hold Cancelled!", 1500, UI_DASHBOARD);
+      showToastLCD(getHoldTargetTitle(), "Hold Cancelled", 1500, UI_DASHBOARD);
     }
-    return;
-  }
-
-  // --- 2. Standard 5-Second BOOT Button Full Factory Reset ---
-  if (digitalRead(BOOT_BTN) == LOW) {
-    if (!bootBtnHolding) {
-      bootBtnHolding = true;
-      bootBtnPressStart = now;
-      lastBootCountdownSec = -1;
-    } else {
-      unsigned long elapsed = now - bootBtnPressStart;
-      if (elapsed >= 5000UL) {
-        executeFullFactoryReset();
-      } else if (elapsed >= 500UL) {
-        int remSec = 5 - (elapsed / 1000UL);
-        if (remSec != lastBootCountdownSec) {
-          lastBootCountdownSec = remSec;
-          triggerBeep(60, 1, 0);
-        }
-      }
-    }
-  } else {
-    bootBtnHolding = false;
-    lastBootCountdownSec = -1;
   }
 }
 
@@ -673,20 +813,63 @@ void checkBootFactoryReset() {
 // SILENT BACKGROUND NTP & AUTOMATION SCHEDULER
 // ============================================================================
 void updateNtpSilently() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
   unsigned long now = millis();
-  if (pendingNtpSync || !ntpSynced || (now - lastNtpSyncMillis >= 3600000UL)) {
-    if (pendingNtpSync || lastNtpSyncMillis == 0 || (now - lastNtpSyncMillis >= 30000UL)) {
-      configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    bool needRetry = !ntpSynced && (lastNtpSyncMillis == 0 || (now - lastNtpSyncMillis >= 30000UL));
+    bool needHourly = ntpSynced && (now - lastNtpSyncMillis >= 3600000UL);
+
+    if (pendingNtpSync || needRetry || needHourly) {
+      sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
+      configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov", "time.google.com");
       lastNtpSyncMillis = now;
+      if (pendingNtpSync) {
+        ntpReqState = NTP_REQ_SYNCING;
+        ntpReqStartMillis = now;
+      }
       pendingNtpSync = false;
+    }
+  } else if (pendingNtpSync) {
+    pendingNtpSync = false;
+    ntpReqState = NTP_REQ_FAILED;
+    if (ntpReqFromLCD) {
+      ntpReqFromLCD = false;
+      triggerBeep(150, 2, 80);
+      showToastLCD("NTP Sync Failed", "No WiFi Network", 1500, UI_MAIN_MENU);
     }
   }
 
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo, 0)) {
-    if (timeinfo.tm_year + 1900 >= 2024) {
+  // Evaluate active manual sync request (6-second timeout)
+  if (ntpReqState == NTP_REQ_SYNCING) {
+    struct tm ti;
+    bool packetArrived = (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+    bool timeValid = (now - ntpReqStartMillis >= 600UL) && getLocalTime(&ti, 0) && (ti.tm_year + 1900 >= 2024);
+
+    if ((packetArrived || timeValid) && getLocalTime(&ti, 0) && (ti.tm_year + 1900 >= 2024)) {
+      ntpSynced = true;
+      ntpReqState = NTP_REQ_SUCCESS;
+      if (ntpReqFromLCD) {
+        ntpReqFromLCD = false;
+        char tStr[20];
+        strftime(tStr, sizeof(tStr), "Time: %H:%M:%S", &ti);
+        triggerBeep(80, 1, 0);
+        showToastLCD("Time Updated!", tStr, 1500, UI_MAIN_MENU);
+      }
+    } else if (now - ntpReqStartMillis >= 6000UL) {
+      ntpReqState = NTP_REQ_FAILED;
+      if (ntpReqFromLCD) {
+        ntpReqFromLCD = false;
+        triggerBeep(150, 2, 80);
+        showToastLCD("NTP Sync Failed", "Server Timeout", 1500, UI_MAIN_MENU);
+      }
+    }
+  }
+
+  static unsigned long lastTimeCheck = 0;
+  if (now - lastTimeCheck >= 1000UL) {
+    lastTimeCheck = now;
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 0) && (timeinfo.tm_year + 1900 >= 2024)) {
       ntpSynced = true;
     }
   }
@@ -795,7 +978,7 @@ void checkTimersAndSchedules() {
 // PZEM-004T READING
 // ============================================================================
 void updatePzemReadings() {
-  if (resetKwhRequested || pendingFactoryData || pendingRestart) return;
+  if (resetKwhRequested || pendingFactoryData || pendingFactoryAll || pendingRestart) return;
   // Do not turn on or poll PZEM until setup() finishes and enables PZEM_RELAY
   digitalWrite(PZEM_RELAY, LOW);
 
@@ -857,25 +1040,21 @@ void controlMainOutput() {
   unsigned long protDelayMs = (unsigned long)max(10, settings.protectionDelay) * 1000UL;
 
   // 1. Evaluate Protection Faults FIRST (Always track grid faults even if manual output is OFF)
+  bool anyProtEnabled = settings.highVProtec || settings.LowVProtec || settings.highPProtec || settings.highHzProtec || settings.lowHzProtec;
   bool faultActive = false;
+
   if (cur.valid) {
     if (settings.highVProtec && cur.voltage > settings.voltHigh) faultActive = true;
     if (settings.LowVProtec && cur.voltage < settings.voltLow) faultActive = true;
     if (settings.highPProtec && cur.power > settings.powerHigh) faultActive = true;
     if (settings.highHzProtec && cur.frequency > settings.freqHigh) faultActive = true;
     if (settings.lowHzProtec && cur.frequency < settings.freqLow) faultActive = true;
-  }
-
-  if (faultActive) {
-    if (!protectionWasActive) {
-      triggerBeep(250, 3, 100);  // Instant trip alarm
-    }
-    protectionWasActive = true;
-    waitingForDelay = false;
+  } else if (anyProtEnabled) {
+    // Sensor communication lost while active protection is required -> hold output OFF safely
     shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH);  // Immediately cut power
+    digitalWrite(MAIN_RELAY, HIGH);
     relayPhysicalOn = false;
-    strcpy(protectionStatusText, "PRO. TRIG.");
+    strcpy(protectionStatusText, "SENSOR ERR");
     return;
   }
 
@@ -1290,7 +1469,7 @@ void setupWebServerRoutes() {
       else if (key == "pzemInterval") settings.pzemInterval = max(1, doc["value"].as<int>());
       else if (key == "alertInterval") settings.alertInterval = max(5, doc["value"].as<int>());
       else if (key == "protectionDelay") settings.protectionDelay = max(10, doc["value"].as<int>());
-      else if (key == "startupTime") settings.startupTime = constrain(doc["value"].as<int>(), 0, 600);
+      else if (key == "startupTime") settings.startupTime = constrain(doc["value"].as<int>(), 5, 600);
 
       saveSettings();
       request->send(200, "application/json", "{\"success\":true}");
@@ -1331,15 +1510,28 @@ void setupWebServerRoutes() {
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
       StaticJsonDocument<256> doc;
       if (!deserializeJson(doc, data, len)) {
-        settings.voltHigh = doc["voltHigh"] | settings.voltHigh;
-        settings.voltLow = doc["voltLow"] | settings.voltLow;
-        settings.powerHigh = doc["powerHigh"] | settings.powerHigh;
-        settings.powerLow = doc["powerLow"] | settings.powerLow;
+        float vh = doc["voltHigh"] | settings.voltHigh;
+        float vl = doc["voltLow"] | settings.voltLow;
+        float ph = doc["powerHigh"] | settings.powerHigh;
+        float pl = doc["powerLow"] | settings.powerLow;
+        float fh = doc["freqHigh"] | settings.freqHigh;
+        float fl = doc["freqLow"] | settings.freqLow;
+        int al = doc["afpcLowWatt"] | settings.afpcLowWatt;
+        int ah = doc["afpcHighWatt"] | settings.afpcHighWatt;
+
+        if (vl >= vh || pl >= ph || fl >= fh || al >= ah) {
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Low limit must be less than High limit\"}");
+          return;
+        }
+        settings.voltHigh = vh;
+        settings.voltLow = vl;
+        settings.powerHigh = ph;
+        settings.powerLow = pl;
         settings.maxkWh = doc["maxkWh"] | settings.maxkWh;
-        settings.freqHigh = doc["freqHigh"] | settings.freqHigh;
-        settings.freqLow = doc["freqLow"] | settings.freqLow;
-        settings.afpcLowWatt = doc["afpcLowWatt"] | settings.afpcLowWatt;
-        settings.afpcHighWatt = doc["afpcHighWatt"] | settings.afpcHighWatt;
+        settings.freqHigh = fh;
+        settings.freqLow = fl;
+        settings.afpcLowWatt = al;
+        settings.afpcHighWatt = ah;
         saveSettings();
       }
       request->send(200, "application/json", "{\"success\":true}");
@@ -1396,50 +1588,86 @@ void setupWebServerRoutes() {
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
-        settings.startupTime = constrain(doc["startupTime"] | settings.startupTime, 0, 600);
+        settings.startupTime = constrain(doc["startupTime"] | settings.startupTime, 5, 600);
         saveSettings();
       }
       request->send(200, "application/json", "{\"success\":true}");
     });
 
-  // mDNS Endpoints
+  // mDNS Endpoints (Save, Reset, Delete)
   server.on(
     "/mdns/save", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-      StaticJsonDocument<128> doc;
+      StaticJsonDocument<192> doc;
       if (!deserializeJson(doc, data, len)) {
-        settings.mdnsEnabled = doc["enabled"] | true;
-        String host = doc["hostname"] | "";
-        host.trim();
-        if (host.length() > 0 && host.length() < 31) {
-          strncpy(settings.mdnsHostname, host.c_str(), 31);
-          settings.mdnsHostname[31] = '\0';
+        if (doc.containsKey("enabled")) {
+          settings.mdnsEnabled = doc["enabled"].as<bool>();
         }
+        String rawHost = doc["hostname"] | "";
+        rawHost.trim();
+        rawHost.toLowerCase();
+        if (rawHost.endsWith(".local")) {
+          rawHost = rawHost.substring(0, rawHost.length() - 6);
+        }
+        String cleanHost = "";
+        for (size_t i = 0; i < rawHost.length() && cleanHost.length() < 30; i++) {
+          char c = rawHost.charAt(i);
+          if (isalnum(c) || c == '-') cleanHost += c;
+        }
+        while (cleanHost.startsWith("-")) cleanHost.remove(0, 1);
+        while (cleanHost.endsWith("-")) cleanHost.remove(cleanHost.length() - 1);
+
+        if (cleanHost.length() == 0) {
+          cleanHost = getDefaultMdnsName();
+        }
+        strncpy(settings.mdnsHostname, cleanHost.c_str(), 31);
+        settings.mdnsHostname[31] = '\0';
+
         saveSettings();
         pendingMdnsRestart = true;
-        request->send(200, "application/json", "{\"success\":true}");
+
+        StaticJsonDocument<192> resDoc;
+        resDoc["success"] = true;
+        resDoc["enabled"] = settings.mdnsEnabled;
+        resDoc["hostname"] = settings.mdnsHostname;
+        String res;
+        serializeJson(resDoc, res);
+        request->send(200, "application/json", res);
       } else {
-        request->send(400, "application/json", "{\"success\":false}");
+        request->send(400, "application/json", "{\"success\":false,\"error\":\"Invalid JSON\"}");
       }
     });
 
-  server.on(
-    "/mdns/reset", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
-    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-      settings.mdnsEnabled = true;
-      strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
-      settings.mdnsHostname[31] = '\0';
-      saveSettings();
-      pendingMdnsRestart = true;
-      request->send(200, "application/json", "{\"success\":true}");
-    });
+  server.on("/mdns/reset", HTTP_POST, [](AsyncWebServerRequest* request) {
+    settings.mdnsEnabled = true;
+    strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+    settings.mdnsHostname[31] = '\0';
+    saveSettings();
+    pendingMdnsRestart = true;
+
+    StaticJsonDocument<192> resDoc;
+    resDoc["success"] = true;
+    resDoc["enabled"] = settings.mdnsEnabled;
+    resDoc["hostname"] = settings.mdnsHostname;
+    String res;
+    serializeJson(resDoc, res);
+    request->send(200, "application/json", res);
+  });
 
   server.on("/mdns/delete", HTTP_POST, [](AsyncWebServerRequest* request) {
     settings.mdnsEnabled = false;
     strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+    settings.mdnsHostname[31] = '\0';
     saveSettings();
     pendingMdnsRestart = true;
-    request->send(200, "application/json", "{\"success\":true}");
+
+    StaticJsonDocument<192> resDoc;
+    resDoc["success"] = true;
+    resDoc["enabled"] = false;
+    resDoc["hostname"] = settings.mdnsHostname;
+    String res;
+    serializeJson(resDoc, res);
+    request->send(200, "application/json", res);
   });
 
   // Node-RED Endpoints
@@ -1485,17 +1713,25 @@ void setupWebServerRoutes() {
 
   // Data, Time & System Maintenance Endpoints
   server.on("/data/clear-kwh", HTTP_POST, [](AsyncWebServerRequest* request) {
+    struct tm ti;
+    if (!ntpSynced || !getLocalTime(&ti, 0) || (ti.tm_year + 1900 < 2024)) {
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"NTP not synced! Sync time first.\"}");
+      return;
+    }
     resetKwhRequested = true;
     request->send(200, "application/json", "{\"success\":true}");
   });
+
   server.on("/factory/reset-data", HTTP_POST, [](AsyncWebServerRequest* request) {
-    pendingFactoryData = true;
-    request->send(200, "application/json", "{\"success\":true}");
+    startHoldResetFlow(HOLD_TARGET_DATA);
+    request->send(200, "application/json", "{\"success\":true,\"state\":\"wait_press\"}");
   });
+
   server.on("/factory/reset-settings", HTTP_POST, [](AsyncWebServerRequest* request) {
-    pendingFactoryAll = true;
-    request->send(200, "application/json", "{\"success\":true}");
+    startHoldResetFlow(HOLD_TARGET_FACTORY);
+    request->send(200, "application/json", "{\"success\":true,\"state\":\"wait_press\"}");
   });
+
   server.on(
     "/time/timezone", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
@@ -1507,10 +1743,47 @@ void setupWebServerRoutes() {
       }
       request->send(200, "application/json", "{\"success\":true}");
     });
+
   server.on("/time/sync", HTTP_POST, [](AsyncWebServerRequest* request) {
+    if (WiFi.status() != WL_CONNECTED) {
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"WiFi disconnected! Connect to WiFi first.\"}");
+      return;
+    }
+    ntpReqFromLCD = false;
+    ntpReqState = NTP_REQ_SYNCING;
+    ntpReqStartMillis = millis();
     pendingNtpSync = true;
-    request->send(200, "application/json", "{\"success\":true}");
+    request->send(200, "application/json", "{\"success\":true,\"state\":\"syncing\"}");
   });
+
+  server.on("/time/sync-status", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<192> doc;
+    if (ntpReqState == NTP_REQ_SYNCING) {
+      doc["state"] = "syncing";
+    } else if (ntpReqState == NTP_REQ_SUCCESS) {
+      doc["state"] = "success";
+      struct tm ti;
+      if (getLocalTime(&ti, 0)) {
+        char tBuf[16], dBuf[16];
+        strftime(tBuf, sizeof(tBuf), "%H:%M:%S", &ti);
+        strftime(dBuf, sizeof(dBuf), "%d/%m/%Y", &ti);
+        doc["time"] = tBuf;
+        doc["date"] = dBuf;
+      }
+      ntpReqState = NTP_REQ_IDLE;
+    } else if (ntpReqState == NTP_REQ_FAILED) {
+      doc["state"] = "failed";
+      doc["error"] = (WiFi.status() != WL_CONNECTED) ? "WiFi disconnected" : "NTP server unreachable";
+      ntpReqState = NTP_REQ_IDLE;
+    } else {
+      doc["state"] = "idle";
+    }
+    doc["ntpSynced"] = ntpSynced;
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
+
   server.on("/restart", HTTP_POST, [](AsyncWebServerRequest* request) {
     pendingRestart = true;
     restartScheduledMillis = millis() + 400;
@@ -1732,6 +2005,7 @@ void setupWebServerRoutes() {
       }
       for (int i = 0; i < MAX_USERS; i++) {
         if (!users[i].active) {
+          memset(&users[i], 0, sizeof(UserAccount));
           users[i].active = true;
           strncpy(users[i].username, newU.c_str(), 19);
           strncpy(users[i].password, newP.c_str(), 19);
@@ -1783,16 +2057,17 @@ void setupWebServerRoutes() {
     });
 
   server.on("/users/forget-start", HTTP_POST, [](AsyncWebServerRequest* request) {
-    forgetUserState = FORGET_WAIT_PRESS;
-    forgetUserTimerMillis = millis();
-    lastForgetBeepSec = -1;
-    triggerBeep(80, 2, 60);
-    request->send(200, "application/json", "{\"success\":true}");
+    startHoldResetFlow(HOLD_TARGET_USERS);
+    request->send(200, "application/json", "{\"success\":true,\"state\":\"wait_press\"}");
   });
 
-  server.on("/users/forget-status", HTTP_GET, [](AsyncWebServerRequest* request) {
-    StaticJsonDocument<192> doc;
+  auto sendHoldStatus = [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> doc;
     unsigned long now = millis();
+    const char* targetStr = (holdResetTarget == HOLD_TARGET_DATA) ? "data" : (holdResetTarget == HOLD_TARGET_FACTORY) ? "factory"
+                                                                                                                      : "users";
+    doc["target"] = targetStr;
+
     if (forgetUserState == FORGET_WAIT_PRESS) {
       long rem = max(0L, 5L - (long)((now - forgetUserTimerMillis) / 1000UL));
       doc["state"] = "wait_press";
@@ -1804,44 +2079,105 @@ void setupWebServerRoutes() {
     } else if (forgetUserState == FORGET_DONE) {
       doc["state"] = "done";
       forgetUserState = FORGET_IDLE;
+      holdResetTarget = HOLD_TARGET_NONE;
     } else if (forgetUserState == FORGET_TIMEOUT) {
       doc["state"] = "timeout";
       forgetUserState = FORGET_IDLE;
+      holdResetTarget = HOLD_TARGET_NONE;
     } else if (forgetUserState == FORGET_ABORTED) {
       doc["state"] = "aborted";
       forgetUserState = FORGET_IDLE;
+      holdResetTarget = HOLD_TARGET_NONE;
     } else {
       doc["state"] = "idle";
     }
     String res;
     serializeJson(doc, res);
     request->send(200, "application/json", res);
-  });
+  };
+
+  server.on("/users/forget-status", HTTP_GET, sendHoldStatus);
+  server.on("/factory/reset-status", HTTP_GET, sendHoldStatus);
 
   server.begin();
   Serial.println("[WebServer] AsyncWebServer started on port 80");
 }
 
+void startAPConfigPortal(unsigned long timeoutSec = 180) {
+  WiFiManager wm;
+  wm.setAPStaticIPConfig(
+    IPAddress(192, 168, 4, 1),
+    IPAddress(192, 168, 4, 1),
+    IPAddress(255, 255, 255, 0));
+  wm.setConfigPortalTimeout(timeoutSec);
+
+  // Non-blocking timeout ticker / display updater via standard loop or millis
+  unsigned long portalStart = millis();
+  unsigned long timeoutMs = timeoutSec * 1000UL;
+
+  // Start the portal non-blocking if possible, or use standard startConfigPortal with custom screen
+  // Since startConfigPortal blocks, we can draw the initial screen:
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setDrawColor(0);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  u8g2.drawStr(16, 11, "WIFI SETUP PORTAL");
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(6, 29, "AP : EnergyLog");
+  u8g2.drawStr(6, 43, "IP : 192.168.4.1");
+  u8g2.drawStr(6, 57, "Timeout: 180s");
+  u8g2.sendBuffer();
+
+  // If using WiFiManager's standard blocking startConfigPortal:
+  bool res = wm.startConfigPortal("EnergyLog");
+
+  // Restore clean Station mode after portal closes
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  if (WiFi.status() != WL_CONNECTED && WiFi.SSID().length() > 0) {
+    WiFi.begin();
+  }
+}
+
 void maintainWiFiAndServices() {
   static bool wasConnected = false;
+  static bool firstLoopInit = false;
   static unsigned long lastReconnectTry = 0;
 
   bool isConnected = (WiFi.status() == WL_CONNECTED);
 
+  if (!firstLoopInit) {
+    firstLoopInit = true;
+    wasConnected = isConnected;
+  }
+
   if (isConnected && !wasConnected) {
     wasConnected = true;
-    Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    manualWiFiDisconnected = false;
+    preferences.putBool("needAP", false);
+    Serial.printf("[WiFi] Reconnected! IP: %s\n", WiFi.localIP().toString().c_str());
     setupMDNS();
     pendingNtpSync = true;
   } else if (!isConnected && wasConnected) {
     wasConnected = false;
-    Serial.println("[WiFi] Connection lost. Will retry in background...");
+    MDNS.end();
+    nodeRedConnected = false;
+    Serial.println("[WiFi] Connection lost. Switching to offline fallback...");
   }
 
-  // Non-blocking background reconnect every 20 seconds
-  if (!isConnected && (millis() - lastReconnectTry >= 20000UL)) {
+  // Non-blocking background reconnect every 30s if not manually disconnected
+  if (!isConnected && !manualWiFiDisconnected && (millis() - lastReconnectTry >= 30000UL)) {
     lastReconnectTry = millis();
-    WiFi.reconnect();
+    if (WiFi.getMode() != WIFI_STA) {
+      WiFi.mode(WIFI_STA);
+    }
+    wifi_config_t conf;
+    if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK && strlen(reinterpret_cast<const char*>(conf.sta.ssid)) > 0) {
+      Serial.println("[WiFi] Retrying saved network in background...");
+      WiFi.disconnect(false, false);
+      WiFi.begin();
+    }
   }
 
   // Process deferred tasks safely in loop()
@@ -1852,37 +2188,42 @@ void maintainWiFiAndServices() {
 
   if (pendingWiFiDisconnect) {
     pendingWiFiDisconnect = false;
+    manualWiFiDisconnected = true;
+    WiFi.setAutoReconnect(false);
     WiFi.disconnect(false, false);
+    MDNS.end();
+    nodeRedConnected = false;
   }
 
   if (pendingWiFiForget) {
     pendingWiFiForget = false;
-    WiFiManager wm;
-    wm.resetSettings();
-    WiFi.disconnect(true, true);
-    pendingRestart = true;
-    restartScheduledMillis = millis() + 500;
+    manualWiFiDisconnected = true;
+    MDNS.end();
+    nodeRedConnected = false;
+    eraseWiFiCredentialsNVS();  // Erases saved WiFi credentials; AP starts on next device restart
+    showToastLCD("WiFi Forgotten", "Creds Erased", 1500, UI_DASHBOARD);
   }
 
   if (pendingWiFiPortal) {
     pendingWiFiPortal = false;
-    server.end();  // Temporarily free port 80 for WiFiManager portal
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 14, "AP: ESP.EnergyLog");
-    u8g2.drawStr(0, 28, "IP: 192.168.4.1");
-    u8g2.drawStr(0, 46, "Portal Open (60s)");
-    u8g2.sendBuffer();
+    manualWiFiDisconnected = false;
+    MDNS.end();
+    server.end();  // Free port 80 for WiFiManager
+    delay(100);    // Allow LWIP stack to release port 80
 
-    WiFiManager wm;
-    wm.setConfigPortalTimeout(60);
-    wm.startConfigPortal("ESP.EnergyLog");
+    startAPConfigPortal(180);  // 180 seconds AP timeout
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin();
+    delay(100);      // Allow WiFiManager to release port 80
     server.begin();  // Relaunch AsyncWebServer cleanly
-    setupMDNS();
-    showToastLCD("WiFi Portal", "Closed", 1200, UI_DASHBOARD);
+    wasConnected = (WiFi.status() == WL_CONNECTED);
+    if (wasConnected) {
+      preferences.putBool("needAP", false);
+      setupMDNS();
+      pendingNtpSync = true;
+      showToastLCD("WiFi Connected", WiFi.localIP().toString().c_str(), 1500, UI_DASHBOARD);
+    } else {
+      showToastLCD("Portal Closed", "Offline Mode", 1500, UI_DASHBOARD);
+    }
   }
 
   if (resetKwhRequested) {
@@ -1914,41 +2255,28 @@ void maintainWiFiAndServices() {
 
     if (pzemCleared) {
       triggerBeep(100, 1, 0);
-      showToastLCD("Energy Reset!", "Restarting...", 1500, UI_DASHBOARD);
+      showToastLCD("Energy Cleared", "Rebooting...", 1500, UI_DASHBOARD);
     } else {
       triggerBeep(150, 2, 80);
-      showToastLCD("PZEM Reset Err", "Check AC Input!", 1500, UI_DASHBOARD);
+      showToastLCD("Sensor Error", "Check AC Input", 1500, UI_DASHBOARD);
     }
     pendingRestart = true;
     restartScheduledMillis = millis() + 1500;
   }
 
-  if (pendingFactoryData) {
+  if (pendingFactoryData && (long)(millis() - restartScheduledMillis) >= 0) {
     pendingFactoryData = false;
-    if (ntpSynced) {
-      recordEnergyResetTimestamp();
-    } else {
-      lastResetEpoch = 0;
-      strcpy(lastResetTimeStr, "Not Reset");
-      preferences.remove("rstEpoch");
-      preferences.remove("rstTime");
-    }
-    pzem.resetEnergy();
-    kwhDays = 0.0f;
-    memset(dailySchedules, 0, sizeof(dailySchedules));
-    memset(futureSchedules, 0, sizeof(futureSchedules));
-    saveSchedulesToNVS();
-    showToastLCD("All Data", "Reset Done!", 1200, UI_DASHBOARD);
+    executeDataReset();
   }
 
-  if (pendingFactoryAll) {
+  if (pendingFactoryAll && (long)(millis() - restartScheduledMillis) >= 0) {
     pendingFactoryAll = false;
     executeFullFactoryReset();
   }
 
   if (pendingRestart && (long)(millis() - restartScheduledMillis) >= 0) {
     pendingRestart = false;
-    ESP.restart();
+    performSafeRestart();
   }
 }
 
@@ -2141,7 +2469,6 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
         showToastLCD("WiFi", "Disconnected!", 1200, UI_SUB_MENU);
       } else if (subIdx == 4) {
         pendingWiFiForget = true;
-        showToastLCD("WiFi Cleared", "Restarting...", 1200, UI_DASHBOARD);
       }
       break;
 
@@ -2195,7 +2522,7 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
       break;
 
     case 5:  // Startup
-      if (subIdx == 1) startIntEditor("Startup Delay", &settings.startupTime, 0, 300, 5, 's');
+      if (subIdx == 1) startIntEditor("Startup Delay", &settings.startupTime, 5, 300, 5, 's');
       break;
 
     case 6:  // Intervals
@@ -2301,19 +2628,11 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
       }
       break;
 
-    case 13:  // Factory Reset
+    case 13:  // Factory Reset (Requires 5s press + 15s hold on BOOT button)
       if (subIdx == 1) {
-        startConfirmDialog(
-          "Reset All Data?", []() {
-            pendingFactoryData = true;
-          },
-          UI_SUB_MENU);
+        startHoldResetFlow(HOLD_TARGET_DATA);
       } else if (subIdx == 2) {
-        startConfirmDialog(
-          "Factory Reset?", []() {
-            pendingFactoryAll = true;
-          },
-          UI_SUB_MENU);
+        startHoldResetFlow(HOLD_TARGET_FACTORY);
       }
       break;
   }
@@ -2322,45 +2641,33 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
 void updateDisplayAndUI() {
   unsigned long now = millis();
 
-  // Forget user
+  // Physical BOOT Button Hold Guard Screen (Forget User / Reset Data / Factory Reset)
   if (forgetUserState == FORGET_WAIT_PRESS || forgetUserState == FORGET_HOLDING) {
     u8g2.clearBuffer();
     u8g2.drawFrame(0, 0, 128, 64);
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(16, 18, "FORGET USER");
+    u8g2.drawBox(0, 0, 128, 14);
+    u8g2.setDrawColor(0);
     u8g2.setFont(u8g2_font_6x12_tf);
+    const char* title = getHoldTargetTitle();
+    int tw = u8g2.getStrWidth(title);
+    u8g2.drawStr((128 - tw) / 2, 11, title);
+    u8g2.setDrawColor(1);
+
     char cStr[24];
     if (forgetUserState == FORGET_WAIT_PRESS) {
       int rem = 5 - ((now - forgetUserTimerMillis) / 1000UL);
       snprintf(cStr, sizeof(cStr), "Press BOOT in %ds", max(0, rem));
-      u8g2.drawStr(14, 40, cStr);
+      u8g2.drawStr(14, 36, cStr);
+      u8g2.drawStr(14, 52, "to verify action");
     } else {
       unsigned long elapsed = now - forgetUserTimerMillis;
       int rem = 15 - (elapsed / 1000UL);
-      snprintf(cStr, sizeof(cStr), "Hold BOOT: %d sec", max(0, rem));
-      u8g2.drawStr(16, 38, cStr);
+      snprintf(cStr, sizeof(cStr), "Hold BOOT: %ds", max(0, rem));
+      u8g2.drawStr(20, 36, cStr);
       int barW = map(elapsed, 0, 15000, 0, 108);
       u8g2.drawFrame(10, 46, 108, 8);
       u8g2.drawBox(10, 46, constrain(barW, 0, 108), 8);
     }
-    u8g2.sendBuffer();
-    return;
-  }
-
-  // If BOOT button is held for > 500ms, override display with Factory Reset Countdown
-  if (bootBtnHolding && (now - bootBtnPressStart >= 500UL)) {
-    int rem = 5 - ((now - bootBtnPressStart) / 1000UL);
-    u8g2.clearBuffer();
-    u8g2.drawFrame(0, 0, 128, 64);
-    u8g2.setFont(u8g2_font_7x14B_tr);
-    u8g2.drawStr(14, 20, "FACTORY RESET");
-    u8g2.setFont(u8g2_font_6x12_tf);
-    char cStr[24];
-    snprintf(cStr, sizeof(cStr), "Hold BOOT: %d sec", max(0, rem));
-    u8g2.drawStr(18, 40, cStr);
-    int barW = map(now - bootBtnPressStart, 500, 5000, 0, 108);
-    u8g2.drawFrame(10, 48, 108, 8);
-    u8g2.drawBox(10, 48, constrain(barW, 0, 108), 8);
     u8g2.sendBuffer();
     return;
   }
@@ -2376,7 +2683,6 @@ void updateDisplayAndUI() {
     Measurements cur = readings;
     portEXIT_CRITICAL(&measureMux);
 
-    // Sensor MUST be valid AND within thresholds to be safe
     bool vOk = cur.valid && (cur.voltage >= settings.voltLow && cur.voltage <= settings.voltHigh);
     bool fOk = cur.valid && (cur.frequency >= settings.freqLow && cur.frequency <= settings.freqHigh);
     bool safe = cur.valid && vOk && fOk;
@@ -2388,7 +2694,7 @@ void updateDisplayAndUI() {
       }
     }
 
-    // Debounce RESET_BTN (must hold for 300ms) so boot transients never skip safety check
+    // Debounce RESET_BTN (must hold for 300ms)
     static unsigned long resetHighStart = 0;
     bool manualResetOverride = false;
     if (digitalRead(RESET_BTN) == HIGH) {
@@ -2400,14 +2706,17 @@ void updateDisplayAndUI() {
 
     if ((safe && startupRemainingSec <= 0) || manualResetOverride || checkEncoderButtonClick()) {
       u8g2.clearBuffer();
+      u8g2.drawFrame(0, 0, 128, 64);
+      u8g2.setFont(u8g2_font_7x14B_tr);
+      u8g2.drawStr(14, 30, "SYSTEM ACTIVE");
       u8g2.setFont(u8g2_font_6x12_tf);
-      u8g2.drawStr(31, 35, "Starting...");
+      u8g2.drawStr(18, 48, "Engaging Output");
       u8g2.sendBuffer();
 
       digitalWrite(BUZZER_PIN, HIGH);
-      delay(1500);
+      delay(1000);
       digitalWrite(BUZZER_PIN, LOW);
-      delay(500);
+      delay(300);
 
       startupCheckCompleted = true;
       uiState = UI_DASHBOARD;
@@ -2418,34 +2727,40 @@ void updateDisplayAndUI() {
     if (now - lastStartupDraw >= 200UL) {
       lastStartupDraw = now;
       u8g2.clearBuffer();
+      u8g2.drawFrame(0, 0, 128, 64);
+      u8g2.drawBox(0, 0, 128, 13);
+      u8g2.setDrawColor(0);
       u8g2.setFont(u8g2_font_6x12_tf);
+      u8g2.drawStr(16, 10, "LINE SAFETY CHECK");
+      u8g2.setDrawColor(1);
 
       if (!cur.valid) {
-        u8g2.drawStr(2, 14, "PZEM SENSOR WAIT...");
-        u8g2.drawStr(2, 28, "Checking AC Input");
-        u8g2.drawStr(2, 58, "Push/Click Override");
+        u8g2.drawStr(8, 29, "Waiting for Sensor");
+        u8g2.drawStr(8, 43, "Verify AC Input...");
+        u8g2.drawStr(8, 58, "[Press to Bypass]");
       } else {
         char vBuf[24], fBuf[24];
-        const char* vStat = (cur.voltage > settings.voltHigh) ? "high V" : ((cur.voltage < settings.voltLow) ? "low V" : "normal");
-        const char* fStat = (cur.frequency > settings.freqHigh) ? "high fre." : ((cur.frequency < settings.freqLow) ? "undr fre." : "normal");
+        const char* vStat = (cur.voltage > settings.voltHigh) ? "HIGH" : ((cur.voltage < settings.voltLow) ? "LOW " : "OK  ");
+        const char* fStat = (cur.frequency > settings.freqHigh) ? "HIGH" : ((cur.frequency < settings.freqLow) ? "LOW " : "OK  ");
 
-        snprintf(vBuf, sizeof(vBuf), "%-9s %6.2f V", vStat, cur.voltage);
-        snprintf(fBuf, sizeof(fBuf), "%-9s %5.2f Hz", fStat, cur.frequency);
-        u8g2.drawStr(0, 10, vBuf);
-        u8g2.drawStr(0, 23, fBuf);
+        snprintf(vBuf, sizeof(vBuf), "V: %5.1fV  [%s]", cur.voltage, vStat);
+        snprintf(fBuf, sizeof(fBuf), "F: %5.2fHz [%s]", cur.frequency, fStat);
+        u8g2.drawStr(6, 26, vBuf);
+        u8g2.drawStr(6, 38, fBuf);
 
         if (safe) {
           int totalT = max(1, settings.startupTime);
-          int barW = map(totalT - startupRemainingSec, 0, totalT, 0, 120);
-          u8g2.drawFrame(4, 38, 120, 6);
+          int barW = map(totalT - startupRemainingSec, 0, totalT, 0, 116);
+          u8g2.drawFrame(6, 43, 116, 6);
           if (barW > 0) {
-            u8g2.drawBox(4, 38, constrain(barW, 0, 120), 6);
+            u8g2.drawBox(6, 43, constrain(barW, 0, 116), 6);
           }
           char tBuf[24];
-          snprintf(tBuf, sizeof(tBuf), "wait for...   %d s", startupRemainingSec);
-          u8g2.drawStr(4, 58, tBuf);
+          snprintf(tBuf, sizeof(tBuf), "Main ON in: %ds", startupRemainingSec);
+          u8g2.drawStr(14, 59, tBuf);
         } else {
-          u8g2.drawStr(0, 58, "press push to turn on!");
+          u8g2.drawStr(6, 51, "FAULT: Output OFF");
+          u8g2.drawStr(6, 61, "Press push to ON");
         }
       }
       u8g2.sendBuffer();
@@ -2453,7 +2768,7 @@ void updateDisplayAndUI() {
     return;
   }
 
-  // 2. Main Dashboard State
+  // 2. Main Dashboard State (RESTORED)
   if (uiState == UI_DASHBOARD) {
     if (checkEncoderButtonClick()) {
       triggerBeep(45, 1, 0);
@@ -2569,8 +2884,9 @@ void updateDisplayAndUI() {
         uiState = UI_DASHBOARD;
         return;
       } else if (currentMainMenuIdx == 11) {
+        ntpReqFromLCD = true;
         pendingNtpSync = true;
-        showToastLCD("NTP Clock", "Sync Requested", 1200, UI_MAIN_MENU);
+        showToastLCD("NTP Clock", "Syncing...", 2000, UI_MAIN_MENU);
         return;
       } else if (currentMainMenuIdx == 14) {
         startConfirmDialog(
@@ -2786,74 +3102,90 @@ void updateDisplayAndUI() {
 }
 
 // ============================================================================
-// BOOT SEQUENCE HELPERS & SETUP
+// PROFESSIONAL BOOT SEQUENCE & SETUP
 // ============================================================================
+void drawBootScreen(const char* header, const char* l1, const char* l2 = "", const char* l3 = "") {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setDrawColor(0);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  int hw = u8g2.getStrWidth(header);
+  u8g2.drawStr((128 - hw) / 2, 11, header);
+  u8g2.setDrawColor(1);
+
+  if (strlen(l1) > 0) u8g2.drawStr(6, 29, l1);
+  if (strlen(l2) > 0) u8g2.drawStr(6, 43, l2);
+  if (strlen(l3) > 0) u8g2.drawStr(6, 57, l3);
+  u8g2.sendBuffer();
+}
+
 void bootConnectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
-  WiFi.begin();
 
-  const int MAX_ATTEMPTS = 5;
-  for (int attempts = 0; attempts < MAX_ATTEMPTS; attempts++) {
-    char attemptStr[20];
-    snprintf(attemptStr, sizeof(attemptStr), "Attempt: %d/%d", attempts + 1, MAX_ATTEMPTS);
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Connecting WiFi...");
-    u8g2.drawStr(0, 24, attemptStr);
-    u8g2.sendBuffer();
+  wifi_config_t conf;
+  bool hasSavedCreds = false;
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK) {
+    hasSavedCreds = (strlen(reinterpret_cast<const char*>(conf.sta.ssid)) > 0);
+  }
+  bool needAP = preferences.getBool("needAP", false);
+
+  // 1. After Factory Reset, Forget WiFi, or First-Time Start (no saved credentials) -> Launch AP 'EnergyLog'
+  if (needAP || !hasSavedCreds) {
+    startAPConfigPortal(180);
 
     if (WiFi.status() == WL_CONNECTED) {
-      u8g2.clearBuffer();
-      u8g2.drawStr(0, 12, "WiFi Connected!");
-      u8g2.drawStr(0, 24, "SSID:");
-      u8g2.drawStr(0, 36, WiFi.SSID().c_str());
-      u8g2.drawStr(0, 48, "IP:");
-      u8g2.drawStr(0, 60, WiFi.localIP().toString().c_str());
-      u8g2.sendBuffer();
-      delay(2000);
-      return;
+      preferences.putBool("needAP", false);
+      char ipStr[24];
+      snprintf(ipStr, sizeof(ipStr), "IP: %s", WiFi.localIP().toString().c_str());
+      drawBootScreen("NETWORK ONLINE", "WiFi Configured", WiFi.SSID().c_str(), ipStr);
+      delay(1500);
+    } else {
+      drawBootScreen("OFFLINE MODE", "WiFi Not Configured", "Local Control Ready", "AP Closed");
+      delay(1500);
     }
-    delay(2000);
-  }
-
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "No WiFi Found");
-  u8g2.drawStr(0, 24, "Will auto-connect");
-  u8g2.drawStr(0, 36, "when available");
-  u8g2.drawStr(0, 48, "or use menu");
-  u8g2.sendBuffer();
-  delay(2000);
-}
-
-void bootSyncTime() {
-  if (WiFi.status() != WL_CONNECTED) {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 24, "No WiFi!");
-    u8g2.drawStr(0, 36, "Time not synced!");
-    u8g2.drawStr(0, 48, "Starting offline...");
-    u8g2.sendBuffer();
-    delay(2000);
     return;
   }
 
-  struct tm timeinfo;
+  // 2. Normal Boot with Saved Credentials
+  WiFi.begin();
+  String targetSsid = String(reinterpret_cast<const char*>(conf.sta.ssid));
   const int MAX_ATTEMPTS = 5;
   for (int attempts = 0; attempts < MAX_ATTEMPTS; attempts++) {
-    char attemptStr[20];
-    snprintf(attemptStr, sizeof(attemptStr), "Attempt: %d/%d", attempts + 1, MAX_ATTEMPTS);
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Syncing Time...");
-    u8g2.drawStr(0, 24, attemptStr);
-    u8g2.sendBuffer();
+    char stepStr[24];
+    snprintf(stepStr, sizeof(stepStr), "Attempt %d of %d", attempts + 1, MAX_ATTEMPTS);
+    drawBootScreen("NETWORK INIT", "Connecting WiFi...", targetSsid.c_str(), stepStr);
 
-    configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov");
-    delay(1000);
-    if (getLocalTime(&timeinfo, 500) && (timeinfo.tm_year + 1900 >= 2024)) {
+    if (WiFi.status() == WL_CONNECTED) {
+      break;
+    }
+    delay(1500);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    preferences.putBool("needAP", false);
+    char ipStr[24];
+    snprintf(ipStr, sizeof(ipStr), "IP: %s", WiFi.localIP().toString().c_str());
+    drawBootScreen("NETWORK ONLINE", "Connected to:", WiFi.SSID().c_str(), ipStr);
+    delay(1200);
+  } else {
+    drawBootScreen("OFFLINE MODE", "WiFi Unavailable", "Auto-Retry Active", "Local Control Ready");
+    delay(1200);
+  }
+}
+
+void bootSyncTime() {
+  // Skip NTP screen completely if offline
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  drawBootScreen("CLOCK SYNC", "Contacting NTP...", ntpServer, "Please wait");
+  configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov", "time.google.com");
+
+  struct tm timeinfo;
+  for (int attempts = 0; attempts < 4; attempts++) {
+    if (getLocalTime(&timeinfo, 800) && (timeinfo.tm_year + 1900 >= 2024)) {
       ntpSynced = true;
       lastNtpSyncMillis = millis();
       break;
@@ -2861,35 +3193,23 @@ void bootSyncTime() {
   }
 
   if (ntpSynced) {
-    char timeStr[20], dateStr[20], gmtStr[30];
+    char timeStr[24], dateStr[24];
     strftime(timeStr, sizeof(timeStr), "Time: %H:%M:%S", &timeinfo);
-    strftime(dateStr, sizeof(dateStr), "Date: %d.%m.%Y", &timeinfo);
-    strftime(gmtStr, sizeof(gmtStr), "GMT: %z %Z", &timeinfo);
-
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_t0_14_tr);
-    u8g2.drawStr(0, 16, timeStr);
-    u8g2.drawStr(0, 32, dateStr);
-    u8g2.drawStr(0, 62, gmtStr);
-    u8g2.sendBuffer();
-    delay(2000);
+    strftime(dateStr, sizeof(dateStr), "Date: %d/%m/%Y", &timeinfo);
+    drawBootScreen("CLOCK SYNCED", timeStr, dateStr, "Status: Synchronized");
+    delay(1200);
   } else {
-    u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x12_tf);
-    u8g2.drawStr(0, 12, "Time not synced!");
-    u8g2.drawStr(0, 24, "Check internet!");
-    u8g2.drawStr(0, 48, "Starting offline...");
-    u8g2.sendBuffer();
-    delay(2000);
+    drawBootScreen("CLOCK SYNC", "NTP Unreachable", "Will sync in bg", "Continuing boot...");
+    delay(1000);
   }
 }
 
 void setup() {
-  // 1. Configure Relay & Control Pins FIRST (Both Relays OFF at startup!)
+  // 1. Configure Relay & Control Pins FIRST (Both Relays OFF at startup)
   pinMode(MAIN_RELAY, OUTPUT);
-  digitalWrite(MAIN_RELAY, HIGH);  // Main Output Relay OFF
+  digitalWrite(MAIN_RELAY, HIGH);
   pinMode(PZEM_RELAY, OUTPUT);
-  digitalWrite(PZEM_RELAY, HIGH);  // PZEM AC Input Relay OFF (Delayed Start!)
+  digitalWrite(PZEM_RELAY, HIGH);
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
@@ -2900,119 +3220,78 @@ void setup() {
   pinMode(ENCODER_CLK, INPUT_PULLUP);
   pinMode(ENCODER_DT, INPUT_PULLUP);
 
-  // 2. Initialize Serial Buses (CRITICAL FIX: RX=16, TX=17 for PZEM!)
+  // 2. Initialize Serial Buses
   Serial.begin(115200);
   espSerial.begin(115200, SERIAL_8N1, ESP_COMM_RX, ESP_COMM_TX);
-  Serial2.begin(9600, SERIAL_8N1, 16, 17);  // Pin 16 = RX2, Pin 17 = TX2
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);
 
-  // 3. Initialize Display & Show Welcome Message (3 seconds)
+  // 3. Professional Splash Screen
   u8g2.begin();
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB18_tr);
-  u8g2.drawStr(0, 22, "ESP");
-  u8g2.setFont(u8g2_font_ncenR12_tr);
-  u8g2.drawStr(0, 40, "ENERGY - LOG");
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.setFont(u8g2_font_7x14B_tr);
+  u8g2.drawStr(12, 20, "ENERGY MONITOR");
+  // u8g2.setFont(u8g2_font_6x12_tf);
+  // u8g2.drawStr(14, 36, "Smart Power System");
+  u8g2.drawLine(8, 43, 120, 43);
   u8g2.setFont(u8g2_font_t0_11_tr);
-  u8g2.drawStr(2, 60, "developed by M.Maity");
+  u8g2.drawStr(10, 57, "v3.0  |  M. Maity");
   u8g2.sendBuffer();
-  delay(3000);
 
-  // Double beep after welcome screen
+  // Short double confirmation beep
   digitalWrite(BUZZER_PIN, HIGH);
-  delay(300);
+  delay(150);
   digitalWrite(BUZZER_PIN, LOW);
-  delay(100);
+  delay(80);
   digitalWrite(BUZZER_PIN, HIGH);
-  delay(300);
+  delay(150);
   digitalWrite(BUZZER_PIN, LOW);
-  delay(100);
+  delay(1600);
 
-  // 4. Step-by-Step Hardware, Encoder, and Storage Init Screen
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "Hardware Init...");
-  u8g2.sendBuffer();
-  delay(300);
-
-  u8g2.drawStr(0, 24, "Encoder Setup...");
-  u8g2.sendBuffer();
+  // 4. Consolidated System Initialization (Encoder, SPIFFS, NVS, Config)
+  drawBootScreen("SYSTEM INIT", "Mounting Storage...", "Loading NVS Config...", "");
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_DT), encoderISR, CHANGE);
   setEncoderPos(0);
-  delay(300);
 
-  u8g2.drawStr(0, 36, "Storage Init...");
-  u8g2.sendBuffer();
-  if (!SPIFFS.begin(true)) {
-    u8g2.drawStr(0, 48, "SPIFFS Error!");
-  } else {
-    u8g2.drawStr(0, 48, "SPIFFS OK");
-  }
-  u8g2.sendBuffer();
-  delay(300);
-
+  bool spiffsOk = SPIFFS.begin(true);
   preferences.begin("energy-meter", false);
   lastResetEpoch = preferences.getULong("rstEpoch", 0);
   String savedRstStr = preferences.getString("rstTime", "Not Reset");
   strncpy(lastResetTimeStr, savedRstStr.c_str(), sizeof(lastResetTimeStr) - 1);
   lastResetTimeStr[sizeof(lastResetTimeStr) - 1] = '\0';
-  u8g2.drawStr(0, 60, "Days Fetched!");
-  u8g2.sendBuffer();
-  delay(300);
 
-  // 5. Load Settings
-  u8g2.clearBuffer();
-  u8g2.drawStr(0, 12, "Loading Settings...");
-  u8g2.sendBuffer();
   loadSettings();
   loadUsers();
   loadSchedulesFromNVS();
-  delay(400);
 
-  // 6. Connect to Saved WiFi (with status screen)
-  bootConnectWiFi();
-
-  // 7. Sync NTP Date & Time (with status screen)
-  bootSyncTime();
-
-  // 8. Start Web Server & mDNS
-  u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_6x12_tf);
-  u8g2.drawStr(0, 12, "Starting Server...");
-  u8g2.sendBuffer();
-  setupWebServerRoutes();
-  if (WiFi.status() == WL_CONNECTED) {
-    setupMDNS();
-    u8g2.clearBuffer();
-    u8g2.drawStr(0, 12, "Server Started!");
-    u8g2.drawStr(0, 24, "IP Address:");
-    u8g2.drawStr(0, 36, WiFi.localIP().toString().c_str());
-    u8g2.sendBuffer();
-    delay(2000);
-  } else {
-    u8g2.clearBuffer();
-    u8g2.drawStr(0, 12, "Offline Mode");
-    u8g2.drawStr(0, 24, "Server Ready");
-    u8g2.sendBuffer();
+  if (!spiffsOk) {
+    drawBootScreen("STORAGE WARNING", "SPIFFS Mount Error", "Web UI Unavailable", "");
     delay(1500);
   }
 
-  // 9. System Ready -> NOW Turn ON PZEM AC Input Relay (Delayed Start!)
-  u8g2.clearBuffer();
-  int16_t strWidth = u8g2.getStrWidth("System Ready!");
-  int16_t x = (128 - strWidth) / 2;
-  u8g2.drawStr(x, 36, "System Ready!");
-  u8g2.sendBuffer();
+  // 5. Connect to Saved WiFi or Launch 'EnergyLog' AP Portal
+  bootConnectWiFi();
 
-  digitalWrite(PZEM_RELAY, LOW);  // Power ON PZEM sensor now!
-  delay(1500);                    // Wait 1.5s for PZEM-004T to boot & stabilize
+  // 6. Sync NTP Clock (only if WiFi is connected)
+  bootSyncTime();
 
-  // 10. Take initial PZEM reading & send handshake to Secondary ESP32
+  // 7. Start Web Server, mDNS & Power On PZEM Sensor
+  drawBootScreen("STARTING SERVICES", "Server : Port 80", "AC Sensor  : ON", "Initializing...");
+  setupWebServerRoutes();
+  if (WiFi.status() == WL_CONNECTED) {
+    setupMDNS();
+  }
+
+  digitalWrite(PZEM_RELAY, LOW);  // Power ON PZEM sensor
+  delay(1500);                    // Allow PZEM-004T to stabilize
+
+  // 8. Initial PZEM Poll & Secondary ESP32 Handshake
   updatePzemReadings();
   espSerial.println("HELLO");
   shareDataWithSecondary();
 
-  // 11. Flush any accidental button press before entering Startup Safety Check
+  // 9. Enter Startup Safety Check
   checkEncoderButtonClick();
   startupRemainingSec = max(5, settings.startupTime);
   startupCheckCompleted = false;
