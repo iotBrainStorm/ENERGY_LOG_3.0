@@ -469,6 +469,30 @@
             <div class="space-y-1">
               <div
                 class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
+                data-section="stats"
+              >
+                <svg
+                  class="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                >
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+                  <rect x="9" y="9" width="6" height="6" />
+                  <line x1="9" y1="1" x2="9" y2="4" />
+                  <line x1="15" y1="1" x2="15" y2="4" />
+                  <line x1="9" y1="20" x2="9" y2="23" />
+                  <line x1="15" y1="20" x2="15" y2="23" />
+                  <line x1="20" y1="9" x2="23" y2="9" />
+                  <line x1="20" y1="14" x2="23" y2="14" />
+                  <line x1="1" y1="9" x2="4" y2="9" />
+                  <line x1="1" y1="14" x2="4" y2="14" />
+                </svg>
+                <span>Stats</span>
+              </div>
+              <div
+                class="nav-item flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent cursor-pointer transition-all"
                 data-section="intervals"
               >
                 <svg
@@ -2022,7 +2046,10 @@
                     <div class="text-xs font-medium text-slate-200">
                       Synchronize NTP Clock
                     </div>
-                    <div class="text-[11px] text-slate-500">
+                    <div
+                      id="ntp-sync-subtext"
+                      class="text-[11px] text-slate-500"
+                    >
                       Fetch current time from NTP server
                     </div>
                   </div>
@@ -2100,15 +2127,16 @@
                       Factory Reset All Settings
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Custom parameters &amp; WiFi (Hold BOOT 15s)
+                      All Reset Data parameters, WiFi &amp; users (Hold BOOT
+                      15s)
                     </div>
                   </div>
                   <button
                     onclick="
                       showConfirmModal(
                         'factoryResetSettings',
-                        'Factory Reset Settings?',
-                        'After confirming, press & hold the ESP32 BOOT button within 5s for 15 seconds to restore factory defaults.',
+                        'Factory Reset Device?',
+                        'After confirming, press & hold the ESP32 BOOT button within 5s for 15 seconds to reset all parameters, thresholds, schedules, energy counters, WiFi credentials, and user data to default, followed by a mandatory device restart.',
                         'danger',
                       )
                     "
@@ -2123,6 +2151,123 @@
                     id="factory-reset-status"
                     class="p-3 rounded-xl bg-slate-950 border border-amber-500/30 text-xs font-mono text-amber-300"
                   ></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- System Stats Section (Feature 3) -->
+          <section class="settings-section" id="section-stats">
+            <div class="mb-6">
+              <h1
+                class="text-lg sm:text-xl font-semibold text-white tracking-tight"
+              >
+                System Hardware Stats
+              </h1>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Real-time ESP32 internal temperature, heap memory, and SPIFFS
+                storage
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+              <!-- CPU Temperature Card -->
+              <div
+                class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5"
+              >
+                <div class="flex items-center justify-between mb-2">
+                  <span
+                    class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >
+                    ESP32 CPU Temperature
+                  </span>
+                  <span
+                    id="stat-cpu-temp"
+                    class="font-mono text-base font-bold text-amber-400"
+                  >
+                    --.- °C
+                  </span>
+                </div>
+                <div
+                  class="h-2 w-full bg-slate-950 rounded-full overflow-hidden"
+                >
+                  <div
+                    id="stat-cpu-bar"
+                    class="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 rounded-full transition-all duration-500"
+                    style="width: 0%"
+                  ></div>
+                </div>
+                <div class="text-[11px] text-slate-500 mt-2">
+                  Internal silicon die sensor (normal operating range: 35°C –
+                  75°C)
+                </div>
+              </div>
+
+              <!-- RAM Usage Card -->
+              <div
+                class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5"
+              >
+                <div class="flex items-center justify-between mb-2">
+                  <span
+                    class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >
+                    RAM (Heap) Usage
+                  </span>
+                  <span
+                    id="stat-ram-pct"
+                    class="font-mono text-base font-bold text-cyan-400"
+                  >
+                    --%
+                  </span>
+                </div>
+                <div
+                  class="h-2 w-full bg-slate-950 rounded-full overflow-hidden"
+                >
+                  <div
+                    id="stat-ram-bar"
+                    class="h-full bg-gradient-to-r from-blue-600 to-cyan-400 rounded-full transition-all duration-500"
+                    style="width: 0%"
+                  ></div>
+                </div>
+                <div
+                  id="stat-ram-detail"
+                  class="text-[11px] font-mono text-slate-400 mt-2"
+                >
+                  Used: --- KB / Total: --- KB
+                </div>
+              </div>
+
+              <!-- SPIFFS Usage Card -->
+              <div
+                class="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-5"
+              >
+                <div class="flex items-center justify-between mb-2">
+                  <span
+                    class="text-xs font-semibold uppercase tracking-wider text-slate-300"
+                  >
+                    SPIFFS Flash Usage
+                  </span>
+                  <span
+                    id="stat-spiffs-pct"
+                    class="font-mono text-base font-bold text-emerald-400"
+                  >
+                    --%
+                  </span>
+                </div>
+                <div
+                  class="h-2 w-full bg-slate-950 rounded-full overflow-hidden"
+                >
+                  <div
+                    id="stat-spiffs-bar"
+                    class="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
+                    style="width: 0%"
+                  ></div>
+                </div>
+                <div
+                  id="stat-spiffs-detail"
+                  class="text-[11px] font-mono text-slate-400 mt-2"
+                >
+                  Used: --- KB / Total: --- KB
                 </div>
               </div>
             </div>
@@ -3106,7 +3251,7 @@
       }
 
       function getDefaultMdnsHostname() {
-        return "energylog-" + macSuffix;
+        return "energylog-" + macSuffix.toLowerCase();
       }
 
       function updateMdnsUI(customHost, isEnabled) {
@@ -3173,32 +3318,35 @@
         updateMdnsUI(clean || getDefaultMdnsHostname(), enabled);
       }
 
-      // Verify credentials using /users/list + default fallback
-      async function verifyCredentials(username, password) {
+      // Server-side credential verification with 3-attempt lockout
+      async function verifyCredentials(
+        username,
+        password,
+        requireAdmin = false,
+      ) {
         try {
-          var response = await fetch("/users/list");
-          var users = await response.json();
-          if (Array.isArray(users)) {
-            var user = users.find(function (u) {
-              return u.username === username && u.password === password;
-            });
-            if (user) {
-              return {
-                success: true,
-                role: user.role,
-                username: user.username,
-              };
-            }
-            return { success: false, error: "Invalid username or password" };
-          }
-        } catch (e) {}
-        if (username === "esp" && password === "456456") {
-          return { success: true, role: "admin", username: "esp" };
+          const response = await fetch("/auth/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, requireAdmin }),
+          });
+          return await response.json();
+        } catch (e) {
+          return { success: false, error: "Connection error" };
         }
-        return { success: false, error: "Invalid username or password" };
       }
 
-      // Login verification
+      function handleLockoutRedirect(d) {
+        if (d && d.locked) {
+          showToast("Max 3 attempts exceeded! Locking config.html...", "error");
+          setTimeout(() => {
+            window.location.reload(); // Reloads /config.html which now strictly serves 403 Locked
+          }, 800);
+          return true;
+        }
+        return false;
+      }
+
       function verifyLogin() {
         var username = document.getElementById("login-username").value.trim();
         var password = document.getElementById("login-password").value;
@@ -3210,7 +3358,7 @@
           return;
         }
 
-        verifyCredentials(username, password).then(function (d) {
+        verifyCredentials(username, password, false).then(function (d) {
           if (d.success) {
             currentUser = {
               username: d.username || username,
@@ -3221,6 +3369,8 @@
             loadSchedules();
             loadFutureSchedules();
             loadUsers();
+            updateSystemStats();
+            setInterval(updateSystemStats, 2000);
             fetch("/automation/timer/status")
               .then((r) => r.json())
               .then((d) => {
@@ -3234,7 +3384,6 @@
               })
               .catch(() => {});
 
-            // Real-time sync for Main Output setting (paused while editing output section or verifying admin)
             setInterval(() => {
               const outputSectionActive = document
                 .getElementById("section-output")
@@ -3248,10 +3397,12 @@
                 .then((r) => r.json())
                 .then((s) => {
                   const outEl = document.getElementById("main-output");
-                  const settingVal =
-                    s.mainOutputSetting !== undefined
-                      ? s.mainOutputSetting
-                      : s.mainOutput;
+                  const isProtActive = s.protPhase && s.protPhase !== "none";
+                  const settingVal = isProtActive
+                    ? 0
+                    : s.mainOutput !== undefined
+                      ? s.mainOutput
+                      : s.mainOutputSetting;
                   if (outEl && settingVal !== undefined) {
                     outEl.checked = settingVal === 1 || settingVal === true;
                   }
@@ -3261,6 +3412,37 @@
           } else {
             errorEl.textContent = d.error || "Invalid username or password";
             errorEl.classList.remove("hidden");
+            handleLockoutRedirect(d);
+          }
+        });
+      }
+
+      function confirmAdminVerify() {
+        var username = document
+          .getElementById("admin-verify-user")
+          .value.trim();
+        var password = document.getElementById("admin-verify-pass").value;
+        var errorEl = document.getElementById("admin-verify-error");
+
+        if (!username || !password) {
+          errorEl.textContent = "Please enter admin credentials";
+          errorEl.classList.remove("hidden");
+          return;
+        }
+
+        verifyCredentials(username, password, true).then(function (d) {
+          if (d.success && d.role === "admin") {
+            document
+              .getElementById("admin-verify-modal")
+              .classList.remove("active");
+            if (adminVerifyCallback) {
+              adminVerifyCallback();
+              adminVerifyCallback = null;
+            }
+          } else {
+            errorEl.textContent = d.error || "Invalid admin credentials";
+            errorEl.classList.remove("hidden");
+            handleLockoutRedirect(d);
           }
         });
       }
@@ -3279,38 +3461,6 @@
           .getElementById("admin-verify-modal")
           .classList.remove("active");
         adminVerifyCallback = null;
-      }
-
-      function confirmAdminVerify() {
-        var username = document
-          .getElementById("admin-verify-user")
-          .value.trim();
-        var password = document.getElementById("admin-verify-pass").value;
-        var errorEl = document.getElementById("admin-verify-error");
-
-        if (!username || !password) {
-          errorEl.textContent = "Please enter admin credentials";
-          errorEl.classList.remove("hidden");
-          return;
-        }
-
-        verifyCredentials(username, password).then(function (d) {
-          if (d.success && d.role === "admin") {
-            document
-              .getElementById("admin-verify-modal")
-              .classList.remove("active");
-            if (adminVerifyCallback) {
-              adminVerifyCallback();
-              adminVerifyCallback = null;
-            }
-          } else {
-            errorEl.textContent =
-              d.success && d.role !== "admin"
-                ? "User is not an admin"
-                : d.error || "Invalid credentials";
-            errorEl.classList.remove("hidden");
-          }
-        });
       }
 
       // Sidebar Navigation
@@ -3428,6 +3578,17 @@
 
         if (settings.gmtOffset !== undefined)
           setValue("timezone-select", settings.gmtOffset);
+
+        const ntpSub = document.getElementById("ntp-sync-subtext");
+        if (ntpSub) {
+          if (settings.lastNtpSync && settings.lastNtpSync.length > 0) {
+            ntpSub.textContent = "Last synced: " + settings.lastNtpSync;
+            ntpSub.className = "text-[11px] font-mono text-emerald-400";
+          } else {
+            ntpSub.textContent = "Fetch current time from NTP server";
+            ntpSub.className = "text-[11px] text-slate-500";
+          }
+        }
       }
 
       function setCheckbox(id, value) {
@@ -3460,9 +3621,14 @@
             document.getElementById("wifi-ssid").textContent =
               data.ssid || "---";
             document.getElementById("wifi-ip").textContent = data.ip || "---";
-            document.getElementById("wifi-rssi").textContent = data.rssi
-              ? data.rssi + " dBm"
-              : "---";
+            if (data.rssi !== undefined && data.rssi !== 0) {
+              const rssiVal = parseInt(data.rssi, 10);
+              const pct = Math.min(Math.max(2 * (rssiVal + 100), 0), 100);
+              document.getElementById("wifi-rssi").textContent =
+                `${pct}% (${rssiVal} dBm)`;
+            } else {
+              document.getElementById("wifi-rssi").textContent = "---";
+            }
           } else {
             badge.className =
               "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-500/15 text-rose-400 border border-rose-500/30";
@@ -3507,7 +3673,8 @@
           if (result.success) {
             showToast("Setting updated");
           } else {
-            showToast("Failed to save", "error");
+            if (key === "mainOutput") setCheckbox("main-output", false);
+            showToast(result.error || "Failed to save", "error");
           }
         } catch (error) {
           showToast("Connection error", "error");
@@ -3962,6 +4129,12 @@
                   if (st.state === "success") {
                     clearInterval(ntpPollTimer);
                     ntpPollTimer = null;
+                    const ntpSub = document.getElementById("ntp-sync-subtext");
+                    if (ntpSub && st.lastSync) {
+                      ntpSub.textContent = "Last synced: " + st.lastSync;
+                      ntpSub.className =
+                        "text-[11px] font-mono text-emerald-400";
+                    }
                     showToast(
                       "Time updated: " + (st.time || "Synchronized"),
                       "success",
@@ -4096,12 +4269,17 @@
           body: JSON.stringify(data),
         })
           .then((r) => r.json())
-          .then((d) =>
+          .then((d) => {
+            if (!d.success) {
+              setCheckbox("main-output", false);
+            }
             showToast(
-              d.success ? "Output settings saved" : "Failed",
+              d.success
+                ? "Output settings saved"
+                : d.error || "Not possible! Protection Running",
               d.success ? "success" : "error",
-            ),
-          )
+            );
+          })
           .catch(() => showToast("Connection error", "error"));
       }
 
@@ -4602,6 +4780,40 @@
         );
       }
 
+      // Stats
+      async function updateSystemStats() {
+        try {
+          const r = await fetch("/system-stats.json");
+          const s = await r.json();
+
+          const temp = parseFloat(s.cpuTemp || 0);
+          document.getElementById("stat-cpu-temp").textContent =
+            temp.toFixed(1) + " °C";
+          document.getElementById("stat-cpu-bar").style.width =
+            Math.min(Math.max((temp / 100) * 100, 0), 100) + "%";
+
+          const ramPct = parseFloat(s.ramPct || 0);
+          const ramUsedKB = ((s.ramUsed || 0) / 1024).toFixed(1);
+          const ramTotalKB = ((s.ramTotal || 0) / 1024).toFixed(1);
+          document.getElementById("stat-ram-pct").textContent =
+            ramPct.toFixed(1) + "%";
+          document.getElementById("stat-ram-bar").style.width =
+            Math.min(Math.max(ramPct, 0), 100) + "%";
+          document.getElementById("stat-ram-detail").textContent =
+            `Used: ${ramUsedKB} KB / Total: ${ramTotalKB} KB`;
+
+          const spiffsPct = parseFloat(s.spiffsPct || 0);
+          const spiffsUsedKB = ((s.spiffsUsed || 0) / 1024).toFixed(1);
+          const spiffsTotalKB = ((s.spiffsTotal || 0) / 1024).toFixed(1);
+          document.getElementById("stat-spiffs-pct").textContent =
+            spiffsPct.toFixed(1) + "%";
+          document.getElementById("stat-spiffs-bar").style.width =
+            Math.min(Math.max(spiffsPct, 0), 100) + "%";
+          document.getElementById("stat-spiffs-detail").textContent =
+            `Used: ${spiffsUsedKB} KB / Total: ${spiffsTotalKB} KB`;
+        } catch (e) {}
+      }
+
       // User Management functions
       function loadUsers() {
         fetch("/users/list")
@@ -4707,6 +4919,7 @@
               document.getElementById("new-role").value = "user";
               loadUsers();
             } else {
+              handleLockoutRedirect(d);
               showToast(d.error || "Failed to add user", "error");
             }
           })
@@ -4746,6 +4959,7 @@
                   showToast("User removed");
                   document.getElementById("remove-user-select").value = "";
                 } else {
+                  handleLockoutRedirect(d);
                   showToast(d.error || "Failed to remove user", "error");
                 }
               })

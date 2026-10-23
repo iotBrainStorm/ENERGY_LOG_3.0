@@ -195,6 +195,72 @@
         </div>
       </header>
 
+      <!-- Real-Time Protection Notice Banner (Feature 1) -->
+      <div
+        id="protection-notice"
+        class="hidden mb-5 rounded-2xl border border-rose-500/40 bg-rose-950/30 backdrop-blur-md px-4 py-3.5 sm:px-5 sm:py-4 shadow-lg shadow-rose-950/20 transition-all duration-300"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div class="flex items-start sm:items-center gap-3">
+            <div
+              id="prot-notice-icon"
+              class="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 mt-0.5 sm:mt-0"
+            >
+              <svg
+                class="w-5 h-5 animate-pulse"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  id="prot-notice-badge"
+                  class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                >
+                  PROTECTION ACTIVE
+                </span>
+                <span
+                  id="prot-notice-name"
+                  class="text-xs sm:text-sm font-semibold text-white"
+                >
+                  High Voltage Protection
+                </span>
+              </div>
+              <p class="text-[11px] font-mono text-slate-300 mt-1">
+                Triggered at:
+                <span id="prot-notice-time" class="text-amber-300 font-semibold"
+                  >---</span
+                >
+              </p>
+            </div>
+          </div>
+
+          <div
+            id="prot-countdown-box"
+            class="flex items-center justify-between sm:justify-end gap-2.5 bg-slate-950/80 border border-slate-800/90 rounded-xl px-3.5 py-2 shrink-0"
+          >
+            <span id="prot-rem-label" class="text-[11px] text-slate-400"
+              >Output ON in:</span
+            >
+            <span
+              id="prot-notice-rem"
+              class="font-mono text-xs sm:text-sm font-bold text-emerald-400 tabular-nums"
+            >
+              00m 00s
+            </span>
+          </div>
+        </div>
+      </div>
+
       <!-- Telemetry Cards Grid -->
       <main
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4"
@@ -993,29 +1059,24 @@
         }, 2800);
       }
 
-      // Verify credentials using /users/list + default fallback
-      async function verifyCredentials(username, password) {
+      let authLocked = false;
+
+      // Verify credentials via server-side /auth/verify (enforces 3-attempt lockout)
+      async function verifyCredentials(
+        username,
+        password,
+        requireAdmin = true,
+      ) {
         try {
-          var response = await fetch("/users/list");
-          var users = await response.json();
-          if (Array.isArray(users)) {
-            var user = users.find(function (u) {
-              return u.username === username && u.password === password;
-            });
-            if (user) {
-              return {
-                success: true,
-                role: user.role,
-                username: user.username,
-              };
-            }
-            return { success: false, error: "Invalid username or password" };
-          }
-        } catch (e) {}
-        if (username === "esp" && password === "456456") {
-          return { success: true, role: "admin", username: "esp" };
+          const response = await fetch("/auth/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, requireAdmin }),
+          });
+          return await response.json();
+        } catch (e) {
+          return { success: false, error: "Communication error" };
         }
-        return { success: false, error: "Invalid username or password" };
       }
 
       function requireAdmin(callback) {
@@ -1045,7 +1106,7 @@
           return;
         }
 
-        verifyCredentials(username, password).then(function (d) {
+        verifyCredentials(username, password, true).then(function (d) {
           if (d.success && d.role === "admin") {
             document
               .getElementById("admin-verify-modal")
@@ -1055,10 +1116,17 @@
               adminVerifyCallback = null;
             }
           } else {
-            errorEl.textContent =
-              d.success && d.role !== "admin"
-                ? "User is not an administrator"
-                : d.error || "Invalid credentials";
+            if (d.locked) {
+              authLocked = true;
+              applyAuthLockUI(true);
+              closeAdminVerify();
+              showToast(
+                "Max 3 attempts exceeded! Relay & Settings locked until restart.",
+                "error",
+              );
+              return;
+            }
+            errorEl.textContent = d.error || "Invalid admin credentials";
             errorEl.classList.remove("hidden");
           }
         });
@@ -1126,7 +1194,100 @@
       updateDateTime();
       setInterval(updateDateTime, 1000);
 
+      function applyAuthLockUI(locked) {
+        authLocked = locked;
+        const btn = document.getElementById("power-toggle");
+        if (!btn) return;
+        if (locked) {
+          btn.classList.add("opacity-40", "cursor-not-allowed");
+          btn.title =
+            "Relay Locked (Max 3 Auth Attempts Exceeded - Restart Device)";
+        } else {
+          btn.classList.remove("opacity-40", "cursor-not-allowed");
+        }
+      }
+
+      function formatRemTime(totalSec) {
+        const s = Math.max(0, parseInt(totalSec || 0));
+        const m = Math.floor(s / 60);
+        const remS = s % 60;
+        return (
+          String(m).padStart(2, "0") +
+          "m " +
+          String(remS).padStart(2, "0") +
+          "s"
+        );
+      }
+
+      let currentProtPhase = "none";
+
+      function updateProtectionBanner(data) {
+        const banner = document.getElementById("protection-notice");
+        const phase = data.protPhase || "none";
+        currentProtPhase = phase;
+        if (!banner) return;
+
+        if (phase === "none") {
+          banner.classList.add("hidden");
+          return;
+        }
+
+        banner.classList.remove("hidden");
+        const badge = document.getElementById("prot-notice-badge");
+        const nameEl = document.getElementById("prot-notice-name");
+        const timeEl = document.getElementById("prot-notice-time");
+        const remLabel = document.getElementById("prot-rem-label");
+        const remEl = document.getElementById("prot-notice-rem");
+
+        nameEl.textContent = data.protName || "Protection Active";
+        timeEl.textContent = data.protTime || "---";
+
+        if (phase === "fault" || phase === "sensor_err") {
+          banner.className =
+            "mb-5 rounded-2xl border border-rose-500/40 bg-rose-950/30 backdrop-blur-md px-4 py-3.5 sm:px-5 sm:py-4 shadow-lg shadow-rose-950/20 transition-all duration-300";
+          badge.className =
+            "px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30";
+          badge.textContent =
+            phase === "sensor_err" ? "SENSOR ERROR" : "PROTECTION RUNNING";
+          remLabel.textContent = "Wait after release:";
+          remEl.textContent = formatRemTime(data.protRem);
+          remEl.className =
+            "font-mono text-xs sm:text-sm font-bold text-rose-400 tabular-nums";
+        } else if (phase === "wait") {
+          banner.className =
+            "mb-5 rounded-2xl border border-amber-500/40 bg-amber-950/25 backdrop-blur-md px-4 py-3.5 sm:px-5 sm:py-4 shadow-lg shadow-amber-950/20 transition-all duration-300";
+          badge.className =
+            "px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30";
+          badge.textContent = "FAULT RELEASED • WAITING";
+          remLabel.textContent = "Main Output ON in:";
+          remEl.textContent = formatRemTime(data.protRem);
+          remEl.className =
+            "font-mono text-xs sm:text-sm font-bold text-emerald-400 tabular-nums";
+        } else if (phase === "kwh_saver") {
+          banner.className =
+            "mb-5 rounded-2xl border border-amber-500/40 bg-amber-950/25 backdrop-blur-md px-4 py-3.5 sm:px-5 sm:py-4 shadow-lg shadow-amber-950/20 transition-all duration-300";
+          badge.className =
+            "px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30";
+          badge.textContent = "QUOTA CUTOFF";
+          remLabel.textContent = "Status:";
+          remEl.textContent = "Reset kWh to Resume";
+          remEl.className =
+            "font-mono text-xs sm:text-sm font-bold text-amber-400";
+        }
+      }
+
       function showPowerConfirm() {
+        if (authLocked) {
+          showToast(
+            "Relay control locked! Restart the device to unlock.",
+            "error",
+          );
+          return;
+        }
+        if (!currentOutputState && currentProtPhase !== "none") {
+          showToast("Not possible! Protection Running", "error");
+          return;
+        }
         intendedOutputState = !currentOutputState;
         const modal = document.getElementById("power-confirm-modal");
         const title = document.getElementById("confirm-title");
@@ -1174,7 +1335,10 @@
                 updatePowerButton(newState);
                 showToast("Main output turned " + (newState ? "ON" : "OFF"));
               } else {
-                showToast("Failed to change output state", "error");
+                showToast(
+                  data.error || "Not possible! Protection Running",
+                  "error",
+                );
               }
             })
             .catch(() => showToast("Communication error", "error"));
@@ -1234,6 +1398,12 @@
                 data.mainOutput === 1 || data.mainOutput === true,
                 data.statusText,
               );
+              updateProtectionBanner(data);
+              if (data.authLocked !== undefined) {
+                applyAuthLockUI(
+                  data.authLocked === 1 || data.authLocked === true,
+                );
+              }
             }
 
             updateBar(".voltage-fill", (voltage / 300) * 100);

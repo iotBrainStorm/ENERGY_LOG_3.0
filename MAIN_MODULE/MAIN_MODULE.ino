@@ -173,6 +173,20 @@ bool waitingForDelay = false;
 unsigned long protectionClearedTime = 0;
 char protectionStatusText[16] = "MAIN: ON";
 
+// ADD (Feature 1): Real-time Protection Notice Tracking
+char protPhase[16] = "none";       // "none", "fault", "wait", "kwh_saver", "sensor_err"
+char protName[36] = "None";        // Active or last triggered protection name
+char protTriggeredAt[28] = "---";  // Timestamp when protection triggered
+int protRemainingSec = 0;          // Remaining seconds before Main Output turns ON
+
+// ADD (Feature 2): Max 3 Login / Verification Attempts Lockout (Volatile until reboot)
+#define MAX_AUTH_ATTEMPTS 3
+volatile int failedAuthAttempts = 0;
+volatile bool authLockedOut = false;
+
+// ADD (Feature 4): Volatile Last Manual NTP Sync Timestamp String
+char volatileNtpSyncStr[28] = "";  // Resets on reboot (not saved in NVS)
+
 // Quick Countdown Timer (Volatile)
 bool quickTimerActive = false;
 bool quickTimerTurnOn = false;
@@ -370,27 +384,52 @@ void showToastLCD(const char* l1, const char* l2 = "", unsigned long durationMs 
   uiState = UI_TOAST;
 }
 
+bool mdnsRunning = false;
+
 String getMacSuffix() {
   String mac = WiFi.macAddress();
   mac.replace(":", "");
   mac.toUpperCase();
-  if (mac.length() >= 4) return mac.substring(mac.length() - 4);
+  if (mac.length() >= 4 && mac != "000000000000") {
+    return mac.substring(mac.length() - 4);
+  }
   return "0000";
 }
 
 String getDefaultMdnsName() {
-  return "energylog-" + getMacSuffix();
+  String suffix = getMacSuffix();
+  suffix.toLowerCase();
+  return "energylog-" + suffix;
 }
 
 void setupMDNS() {
-  MDNS.end();
-  if (!settings.mdnsEnabled || WiFi.status() != WL_CONNECTED) return;
+  if (mdnsRunning) {
+    MDNS.end();
+    mdnsRunning = false;
+  }
+  if (!settings.mdnsEnabled || WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
+    return;
+  }
+
   String host = String(settings.mdnsHostname);
   host.trim();
-  if (host.length() == 0) host = getDefaultMdnsName();
-  if (MDNS.begin(host.c_str())) {
+  if (host.endsWith(".local") || host.endsWith(".LOCAL")) {
+    host = host.substring(0, host.length() - 6);
+  }
+  if (host.length() == 0 || host.equalsIgnoreCase("energylog-0000")) {
+    host = getDefaultMdnsName();
+    strncpy(settings.mdnsHostname, host.c_str(), 31);
+    settings.mdnsHostname[31] = '\0';
+  }
+
+  String lowerHost = host;
+  lowerHost.toLowerCase();
+  WiFi.setHostname(lowerHost.c_str());
+
+  if (MDNS.begin(lowerHost.c_str())) {
     MDNS.addService("http", "tcp", 80);
-    Serial.printf("[mDNS] Responder started: http://%s.local\n", host.c_str());
+    mdnsRunning = true;
+    Serial.printf("[mDNS] Responder started: http://%s.local\n", lowerHost.c_str());
   }
 }
 
@@ -529,8 +568,10 @@ void loadSettings() {
     saveSettings();
     preferences.putBool("needAP", true);  // First-time start -> launch AP
   }
-  if (strlen(settings.mdnsHostname) == 0) {
+  if (strlen(settings.mdnsHostname) == 0 || strcasecmp(settings.mdnsHostname, "energylog-0000") == 0) {
     strncpy(settings.mdnsHostname, getDefaultMdnsName().c_str(), 31);
+    settings.mdnsHostname[31] = '\0';
+    saveSettings();
   }
   if (settings.startupTime < 5) {
     settings.startupTime = 60;  // Ensure startup safety check always runs
@@ -554,13 +595,49 @@ void loadUsers() {
   }
 }
 
-bool verifyAdminCreds(const String& u, const String& p) {
+void recordAuthFailure() {
+  failedAuthAttempts++;
+  if (failedAuthAttempts >= MAX_AUTH_ATTEMPTS) {
+    authLockedOut = true;
+    triggerBeep(300, 3, 100);
+  }
+}
+
+bool verifyUserCreds(const String& u, const String& p, bool requireAdmin, String& outRole) {
+  if (authLockedOut) return false;
   for (int i = 0; i < MAX_USERS; i++) {
-    if (users[i].active && u == users[i].username && p == users[i].password && String(users[i].role) == "admin") {
+    if (users[i].active && u == users[i].username && p == users[i].password) {
+      outRole = String(users[i].role);
+      if (requireAdmin && outRole != "admin") {
+        recordAuthFailure();
+        return false;
+      }
+      failedAuthAttempts = 0;  // Reset counter on valid login before lockout
       return true;
     }
   }
+  recordAuthFailure();
   return false;
+}
+
+bool verifyAdminCreds(const String& u, const String& p) {
+  String role;
+  return verifyUserCreds(u, p, true, role);
+}
+
+// Helper to record exact timestamp when a protection triggers
+void recordProtectionTrigger(const char* reason) {
+  strncpy(protName, reason, sizeof(protName) - 1);
+  protName[sizeof(protName) - 1] = '\0';
+
+  struct tm ti;
+  if (ntpSynced && getLocalTime(&ti, 0) && (ti.tm_year + 1900 >= 2024)) {
+    strftime(protTriggeredAt, sizeof(protTriggeredAt), "%d.%m.%Y %H:%M:%S", &ti);
+  } else {
+    unsigned long sec = millis() / 1000UL;
+    snprintf(protTriggeredAt, sizeof(protTriggeredAt), "Uptime %02lu:%02lu:%02lu",
+             sec / 3600UL, (sec % 3600UL) / 60UL, sec % 60UL);
+  }
 }
 
 void saveSchedulesToNVS() {
@@ -621,21 +698,25 @@ void performSafeRestart() {
   digitalWrite(PZEM_RELAY, HIGH);  // Power down PZEM sensor cleanly
   digitalWrite(BUZZER_PIN, LOW);   // Silence buzzer
   server.end();                    // Close open HTTP connections
-  MDNS.end();
+  if (mdnsRunning) {
+    MDNS.end();
+    mdnsRunning = false;
+  }
   preferences.end();
   delay(150);
   ESP.restart();
 }
 
 void eraseWiFiCredentialsNVS() {
-  WiFi.mode(WIFI_STA);
+  if (mdnsRunning) {
+    MDNS.end();
+    mdnsRunning = false;
+  }
+  WiFi.mode(WIFI_STA);  // Keep WiFi driver initialized so esp_wifi_restore() succeeds
   WiFi.persistent(true);
   WiFi.setAutoReconnect(false);
-  WiFiManager wm;
-  wm.resetSettings();
-  WiFi.disconnect(false, true);  // Wipe SSID/Pass from NVS
-  esp_wifi_restore();            // Ensure ESP-IDF WiFi NVS is completely cleared
-  WiFi.disconnect(true, true);
+  WiFi.disconnect(false, true);  // Disconnect & wipe STA SSID/Pass without deinitializing driver
+  esp_wifi_restore();            // Completely clear ESP-IDF WiFi NVS
   preferences.putBool("needAP", true);
 }
 
@@ -726,28 +807,37 @@ void executeFullFactoryReset() {
   delay(800);
   digitalWrite(BUZZER_PIN, LOW);
 
-  // Clear PZEM energy counter reliably
-  clearPzemEnergyReliable();
-
-  // Clear all NVS keys & restore default settings, users, and empty schedules
-  preferences.clear();
+  // 1. Reset all "Reset Data" parameters (Settings, Schedules, PZEM Energy & Billing)
   applyDefaultSettings();
   saveSettings();
-  resetUsersToDefault();
 
   memset(dailySchedules, 0, sizeof(dailySchedules));
   memset(futureSchedules, 0, sizeof(futureSchedules));
   saveSchedulesToNVS();
 
-  kwhDays = 0.0f;
-  lastResetEpoch = 0;
-  strcpy(lastResetTimeStr, "Not Reset");
-  preferences.putULong("rstEpoch", 0);
-  preferences.putString("rstTime", "Not Reset");
+  clearPzemEnergyReliable();
+  if (ntpSynced) {
+    recordEnergyResetTimestamp();
+  } else {
+    lastResetEpoch = 0;
+    strcpy(lastResetTimeStr, "Not Reset");
+    preferences.putULong("rstEpoch", 0);
+    preferences.putString("rstTime", "Not Reset");
+    kwhDays = 0.0f;
+  }
 
-  // Erase WiFi credentials & flag 'EnergyLog' AP on boot
+  portENTER_CRITICAL(&measureMux);
+  readings.energy = 0.0f;
+  readings.totalDays = 0.0f;
+  portEXIT_CRITICAL(&measureMux);
+
+  // 2. Restore User Accounts to default (esp / 456456)
+  resetUsersToDefault();
+
+  // 3. Erase WiFi credentials & flag 'EnergyLog' AP on boot
   eraseWiFiCredentialsNVS();
 
+  // 4. Mandatory safe restart
   delay(200);
   performSafeRestart();
 }
@@ -848,6 +938,7 @@ void updateNtpSilently() {
     if ((packetArrived || timeValid) && getLocalTime(&ti, 0) && (ti.tm_year + 1900 >= 2024)) {
       ntpSynced = true;
       ntpReqState = NTP_REQ_SUCCESS;
+      strftime(volatileNtpSyncStr, sizeof(volatileNtpSyncStr), "%d.%m.%Y %H:%M:%S", &ti);
       if (ntpReqFromLCD) {
         ntpReqFromLCD = false;
         char tStr[20];
@@ -1039,18 +1130,35 @@ void controlMainOutput() {
 
   unsigned long protDelayMs = (unsigned long)max(10, settings.protectionDelay) * 1000UL;
 
-  // 1. Evaluate Protection Faults FIRST (Always track grid faults even if manual output is OFF)
+  // 1. Evaluate Protection Faults FIRST
   bool anyProtEnabled = settings.highVProtec || settings.LowVProtec || settings.highPProtec || settings.highHzProtec || settings.lowHzProtec;
   bool faultActive = false;
+  const char* currentFaultReason = "";
 
   if (cur.valid) {
-    if (settings.highVProtec && cur.voltage > settings.voltHigh) faultActive = true;
-    if (settings.LowVProtec && cur.voltage < settings.voltLow) faultActive = true;
-    if (settings.highPProtec && cur.power > settings.powerHigh) faultActive = true;
-    if (settings.highHzProtec && cur.frequency > settings.freqHigh) faultActive = true;
-    if (settings.lowHzProtec && cur.frequency < settings.freqLow) faultActive = true;
+    if (settings.highVProtec && cur.voltage > settings.voltHigh) {
+      faultActive = true;
+      currentFaultReason = "High Voltage Protection";
+    } else if (settings.LowVProtec && cur.voltage < settings.voltLow) {
+      faultActive = true;
+      currentFaultReason = "Low Voltage Protection";
+    } else if (settings.highPProtec && cur.power > settings.powerHigh) {
+      faultActive = true;
+      currentFaultReason = "High Power Overload";
+    } else if (settings.highHzProtec && cur.frequency > settings.freqHigh) {
+      faultActive = true;
+      currentFaultReason = "High Frequency Protection";
+    } else if (settings.lowHzProtec && cur.frequency < settings.freqLow) {
+      faultActive = true;
+      currentFaultReason = "Low Frequency Protection";
+    }
   } else if (anyProtEnabled) {
-    // Sensor communication lost while active protection is required -> hold output OFF safely
+    // Sensor communication lost while active protection is required
+    if (strcmp(protPhase, "sensor_err") != 0) {
+      recordProtectionTrigger("PZEM Sensor Comm Error");
+    }
+    strcpy(protPhase, "sensor_err");
+    protRemainingSec = max(10, settings.protectionDelay);
     shouldTurnOff = true;
     digitalWrite(MAIN_RELAY, HIGH);
     relayPhysicalOn = false;
@@ -1058,7 +1166,24 @@ void controlMainOutput() {
     return;
   }
 
-  // 2. Handle Protection Recovery Wait Timer
+  // If a grid fault is actively present right now:
+  if (faultActive) {
+    if (!protectionWasActive || waitingForDelay || strcmp(protName, currentFaultReason) != 0) {
+      recordProtectionTrigger(currentFaultReason);
+      triggerBeep(200, 3, 80);
+    }
+    protectionWasActive = true;
+    waitingForDelay = false;  // Reset countdown until fault releases
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protPhase, "fault");
+    protRemainingSec = max(10, settings.protectionDelay);
+    strcpy(protectionStatusText, "PROT TRIP");
+    return;
+  }
+
+  // 2. Handle Protection Recovery Wait Timer (After fault is released)
   if (protectionWasActive) {
     if (!waitingForDelay) {
       protectionClearedTime = millis();
@@ -1069,12 +1194,16 @@ void controlMainOutput() {
     if (elapsed >= protDelayMs || digitalRead(RESET_BTN) == HIGH) {
       protectionWasActive = false;
       waitingForDelay = false;
+      strcpy(protPhase, "none");
+      protRemainingSec = 0;
       if (settings.mainOutput) triggerBeep(150, 1, 0);
     } else {
       shouldTurnOff = true;
       digitalWrite(MAIN_RELAY, HIGH);
       relayPhysicalOn = false;
       unsigned long rem = protDelayMs - elapsed;
+      protRemainingSec = (int)((rem + 999UL) / 1000UL);
+      strcpy(protPhase, "wait");
       int mins = rem / 60000UL;
       int secs = (rem % 60000UL) / 1000UL;
       snprintf(protectionStatusText, sizeof(protectionStatusText), "Wait:%02d:%02d", mins, secs);
@@ -1082,21 +1211,30 @@ void controlMainOutput() {
     }
   }
 
-  // 3. Manual Output OFF
+  // 3. kWh Energy Saver Cutoff
+  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) {
+    if (strcmp(protPhase, "kwh_saver") != 0) {
+      recordProtectionTrigger("kWh Saver Quota Reached");
+    }
+    strcpy(protPhase, "kwh_saver");
+    protRemainingSec = 0;
+    shouldTurnOff = true;
+    digitalWrite(MAIN_RELAY, HIGH);
+    relayPhysicalOn = false;
+    strcpy(protectionStatusText, "kWh SAVER");
+    return;
+  }
+
+  // Clear protection notice phase when no protection is holding output off
+  strcpy(protPhase, "none");
+  protRemainingSec = 0;
+
+  // 4. Manual Output OFF
   if (!settings.mainOutput) {
     shouldTurnOff = true;
     digitalWrite(MAIN_RELAY, HIGH);
     relayPhysicalOn = false;
     strcpy(protectionStatusText, "MAIN: OFF");
-    return;
-  }
-
-  // 4. kWh Energy Saver Cutoff
-  if (settings.kWhSaver && cur.energy >= (float)settings.maxkWh) {
-    shouldTurnOff = true;
-    digitalWrite(MAIN_RELAY, HIGH);
-    relayPhysicalOn = false;
-    strcpy(protectionStatusText, "kWh SAVER");
     return;
   }
 
@@ -1302,6 +1440,17 @@ void setupWebServerRoutes() {
     serveGzipOrRaw(request, "/index.html", "text/html");
   });
   server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+    if (authLockedOut) {
+      request->send(403, "text/html",
+                    "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Locked</title></head>"
+                    "<body style='background:#020617;color:#f87171;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px;'>"
+                    "<div style='background:#0f172a;border:1px solid #7f1d1d;padding:28px;border-radius:16px;max-width:400px;'>"
+                    "<h2 style='margin-top:0;color:#ef4444;'>Security Lockout Active</h2>"
+                    "<p style='color:#94a3b8;font-size:13px;line-height:1.6;'>Maximum (3) login/verification attempts exceeded. <b>config page</b> is strictly stopped until you restart the device.</p>"
+                    "<a href='/index.html' style='display:inline-block;margin-top:14px;padding:10px 18px;background:#1e293b;color:#f8fafc;text-decoration:none;border-radius:10px;font-size:12px;'>Back to Home Page</a>"
+                    "</div></body></html>");
+      return;
+    }
     serveGzipOrRaw(request, "/config.html", "text/html");
   });
   server.on("/plug_icon.svg", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -1314,7 +1463,7 @@ void setupWebServerRoutes() {
     Measurements cur = readings;
     portEXIT_CRITICAL(&measureMux);
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<768> doc;
     doc["voltage"] = String(cur.voltage, 1);
     doc["current"] = String(cur.current, 2);
     doc["power"] = String(cur.power, 1);
@@ -1326,8 +1475,17 @@ void setupWebServerRoutes() {
     doc["mainOutput"] = relayPhysicalOn ? 1 : 0;
     doc["mainOutputSetting"] = settings.mainOutput ? 1 : 0;
     doc["statusText"] = protectionStatusText;
-    doc["resetTime"] = lastResetTimeStr;   // ADD: Send last reset timestamp
-    doc["ntpSynced"] = ntpSynced ? 1 : 0;  // ADD: Send NTP sync status
+    doc["resetTime"] = lastResetTimeStr;
+    doc["ntpSynced"] = ntpSynced ? 1 : 0;
+
+    // ADD (Feature 1): Protection real-time telemetry
+    doc["protPhase"] = protPhase;
+    doc["protName"] = protName;
+    doc["protTime"] = protTriggeredAt;
+    doc["protRem"] = protRemainingSec;
+
+    // ADD (Feature 2): Lockout state for Home page relay button
+    doc["authLocked"] = authLockedOut ? 1 : 0;
 
     String res;
     serializeJson(doc, res);
@@ -1390,6 +1548,7 @@ void setupWebServerRoutes() {
     doc["alertInterval"] = settings.alertInterval;
     doc["protectionDelay"] = settings.protectionDelay;
     doc["startupTime"] = settings.startupTime;
+    doc["lastNtpSync"] = volatileNtpSyncStr;
 
     String res;
     serializeJson(doc, res);
@@ -1400,15 +1559,19 @@ void setupWebServerRoutes() {
   server.on(
     "/output/set", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (authLockedOut) {
+        request->send(403, "application/json", "{\"success\":false,\"locked\":true,\"error\":\"Relay locked! Restart device.\"}");
+        return;
+      }
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
         bool state = doc["state"];
-        settings.mainOutput = state;
-        if (state) {
-          protectionWasActive = false;
-          waitingForDelay = false;
-          shouldTurnOff = false;
+        if (state && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
+          triggerBeep(150, 2, 80);
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+          return;
         }
+        settings.mainOutput = state;
         saveSettings();
         triggerBeep(60, 1, 0);
         request->send(200, "application/json", state ? "{\"success\":true,\"mainOutput\":1}" : "{\"success\":true,\"mainOutput\":0}");
@@ -1428,11 +1591,13 @@ void setupWebServerRoutes() {
       }
       String key = doc["key"] | "";
       if (key == "mainOutput") {
-        settings.mainOutput = doc["value"].as<bool>();
-        if (settings.mainOutput) {
-          protectionWasActive = false;
-          waitingForDelay = false;
+        bool reqState = doc["value"].as<bool>();
+        if (reqState && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
+          triggerBeep(150, 2, 80);
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+          return;
         }
+        settings.mainOutput = reqState;
       } else if (key == "kWhSaver") settings.kWhSaver = doc["value"].as<bool>();
       else if (key == "afpcEnabled") settings.afpcEnabled = doc["value"].as<bool>();
       else if (key == "targetFactor") settings.targetFactor = constrain(doc["value"].as<float>(), 0.50f, 0.99f);
@@ -1481,12 +1646,15 @@ void setupWebServerRoutes() {
     [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
-        settings.mainOutput = doc["mainOutput"] | settings.mainOutput;
+        bool reqMain = doc["mainOutput"] | settings.mainOutput;
         settings.kWhSaver = doc["kWhSaver"] | settings.kWhSaver;
-        if (settings.mainOutput) {
-          protectionWasActive = false;
-          waitingForDelay = false;
+        if (reqMain && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
+          saveSettings();
+          triggerBeep(150, 2, 80);
+          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+          return;
         }
+        settings.mainOutput = reqMain;
         saveSettings();
       }
       request->send(200, "application/json", "{\"success\":true}");
@@ -1771,6 +1939,7 @@ void setupWebServerRoutes() {
         doc["date"] = dBuf;
       }
       ntpReqState = NTP_REQ_IDLE;
+      doc["lastSync"] = volatileNtpSyncStr;
     } else if (ntpReqState == NTP_REQ_FAILED) {
       doc["state"] = "failed";
       doc["error"] = (WiFi.status() != WL_CONNECTED) ? "WiFi disconnected" : "NTP server unreachable";
@@ -1994,7 +2163,17 @@ void setupWebServerRoutes() {
       String role = doc["role"] | "user";
 
       if (!verifyAdminCreds(adminU, adminP)) {
-        request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+        int rem = max(0, MAX_AUTH_ATTEMPTS - (int)failedAuthAttempts);
+        StaticJsonDocument<192> errDoc;
+        errDoc["success"] = false;
+        errDoc["locked"] = authLockedOut;
+        errDoc["remaining"] = rem;
+        errDoc["error"] = authLockedOut
+                            ? "Device locked (3 failed attempts)! Restart ESP32."
+                            : ("Invalid admin credentials (" + String(rem) + " attempt(s) left)");
+        String res;
+        serializeJson(errDoc, res);
+        request->send(403, "application/json", res);
         return;
       }
       for (int i = 0; i < MAX_USERS; i++) {
@@ -2031,7 +2210,17 @@ void setupWebServerRoutes() {
       String target = doc["username"] | "";
 
       if (!verifyAdminCreds(adminU, adminP)) {
-        request->send(403, "application/json", "{\"success\":false,\"error\":\"Invalid admin credentials\"}");
+        int rem = max(0, MAX_AUTH_ATTEMPTS - (int)failedAuthAttempts);
+        StaticJsonDocument<192> errDoc;
+        errDoc["success"] = false;
+        errDoc["locked"] = authLockedOut;
+        errDoc["remaining"] = rem;
+        errDoc["error"] = authLockedOut
+                            ? "Device locked (3 failed attempts)! Restart ESP32."
+                            : ("Invalid admin credentials (" + String(rem) + " attempt(s) left)");
+        String res;
+        serializeJson(errDoc, res);
+        request->send(403, "application/json", res);
         return;
       }
 
@@ -2099,11 +2288,82 @@ void setupWebServerRoutes() {
   server.on("/users/forget-status", HTTP_GET, sendHoldStatus);
   server.on("/factory/reset-status", HTTP_GET, sendHoldStatus);
 
+  // ADD (Feature 2): Server-side Login & Admin Verification with 3-Attempt Lockout
+  server.on(
+    "/auth/verify", HTTP_POST, [](AsyncWebServerRequest* request) {}, NULL,
+    [](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+      StaticJsonDocument<256> doc;
+      if (deserializeJson(doc, data, len)) {
+        request->send(400, "application/json", "{\"success\":false}");
+        return;
+      }
+      if (authLockedOut) {
+        request->send(403, "application/json",
+                      "{\"success\":false,\"locked\":true,\"remaining\":0,\"error\":\"Maximum 3 attempts exceeded! Restart device.\"}");
+        return;
+      }
+
+      String u = doc["username"] | "";
+      String p = doc["password"] | "";
+      bool reqAdmin = doc["requireAdmin"] | false;
+      String role = "";
+
+      if (verifyUserCreds(u, p, reqAdmin, role)) {
+        StaticJsonDocument<192> resDoc;
+        resDoc["success"] = true;
+        resDoc["username"] = u;
+        resDoc["role"] = role;
+        resDoc["locked"] = false;
+        resDoc["remaining"] = MAX_AUTH_ATTEMPTS;
+        String res;
+        serializeJson(resDoc, res);
+        request->send(200, "application/json", res);
+      } else {
+        int rem = max(0, MAX_AUTH_ATTEMPTS - (int)failedAuthAttempts);
+        StaticJsonDocument<256> resDoc;
+        resDoc["success"] = false;
+        resDoc["locked"] = authLockedOut;
+        resDoc["remaining"] = rem;
+        resDoc["error"] = authLockedOut
+                            ? "Device locked (3 failed attempts)! Restart ESP32."
+                            : ("Invalid credentials (" + String(rem) + " attempt(s) left)");
+        String res;
+        serializeJson(resDoc, res);
+        request->send(403, "application/json", res);
+      }
+    });
+
+  // ADD (Feature 3): Real-time ESP32 CPU Temp, RAM & SPIFFS Stats Endpoint
+  server.on("/system-stats.json", HTTP_GET, [](AsyncWebServerRequest* request) {
+    StaticJsonDocument<256> doc;
+    float cpuTemp = temperatureRead();
+    uint32_t ramTotal = ESP.getHeapSize();
+    uint32_t ramFree = ESP.getFreeHeap();
+    uint32_t ramUsed = (ramTotal > ramFree) ? (ramTotal - ramFree) : 0;
+    float ramPct = (ramTotal > 0) ? ((float)ramUsed * 100.0f / (float)ramTotal) : 0.0f;
+
+    uint32_t spiffsTotal = SPIFFS.totalBytes();
+    uint32_t spiffsUsed = SPIFFS.usedBytes();
+    float spiffsPct = (spiffsTotal > 0) ? ((float)spiffsUsed * 100.0f / (float)spiffsTotal) : 0.0f;
+
+    doc["cpuTemp"] = serialized(String(cpuTemp, 1));
+    doc["ramUsed"] = ramUsed;
+    doc["ramTotal"] = ramTotal;
+    doc["ramPct"] = serialized(String(ramPct, 1));
+    doc["spiffsUsed"] = spiffsUsed;
+    doc["spiffsTotal"] = spiffsTotal;
+    doc["spiffsPct"] = serialized(String(spiffsPct, 1));
+
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res);
+  });
+
   server.begin();
   Serial.println("[WebServer] AsyncWebServer started on port 80");
 }
 
-void startAPConfigPortal(unsigned long timeoutSec = 180) {
+bool startAPConfigPortal(unsigned long timeoutSec = 180) {
   WiFiManager wm;
   wm.setAPStaticIPConfig(
     IPAddress(192, 168, 4, 1),
@@ -2111,12 +2371,6 @@ void startAPConfigPortal(unsigned long timeoutSec = 180) {
     IPAddress(255, 255, 255, 0));
   wm.setConfigPortalTimeout(timeoutSec);
 
-  // Non-blocking timeout ticker / display updater via standard loop or millis
-  unsigned long portalStart = millis();
-  unsigned long timeoutMs = timeoutSec * 1000UL;
-
-  // Start the portal non-blocking if possible, or use standard startConfigPortal with custom screen
-  // Since startConfigPortal blocks, we can draw the initial screen:
   u8g2.clearBuffer();
   u8g2.drawFrame(0, 0, 128, 64);
   u8g2.drawBox(0, 0, 128, 14);
@@ -2129,41 +2383,56 @@ void startAPConfigPortal(unsigned long timeoutSec = 180) {
   u8g2.drawStr(6, 57, "Timeout: 180s");
   u8g2.sendBuffer();
 
-  // If using WiFiManager's standard blocking startConfigPortal:
   bool res = wm.startConfigPortal("EnergyLog");
+  bool connected = (res || WiFi.status() == WL_CONNECTED);
 
-  // Restore clean Station mode after portal closes
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  if (WiFi.status() != WL_CONNECTED && WiFi.SSID().length() > 0) {
-    WiFi.begin();
-  }
+  return connected;
+}
+
+void drawBootScreen(const char* header, const char* l1, const char* l2 = "", const char* l3 = "") {
+  u8g2.clearBuffer();
+  u8g2.drawFrame(0, 0, 128, 64);
+  u8g2.drawBox(0, 0, 128, 14);
+  u8g2.setDrawColor(0);
+  u8g2.setFont(u8g2_font_6x12_tf);
+  int hw = u8g2.getStrWidth(header);
+  u8g2.drawStr((128 - hw) / 2, 11, header);
+  u8g2.setDrawColor(1);
+
+  if (strlen(l1) > 0) u8g2.drawStr(6, 29, l1);
+  if (strlen(l2) > 0) u8g2.drawStr(6, 43, l2);
+  if (strlen(l3) > 0) u8g2.drawStr(6, 57, l3);
+  u8g2.sendBuffer();
 }
 
 void maintainWiFiAndServices() {
   static bool wasConnected = false;
-  static bool firstLoopInit = false;
   static unsigned long lastReconnectTry = 0;
 
-  bool isConnected = (WiFi.status() == WL_CONNECTED);
-
-  if (!firstLoopInit) {
-    firstLoopInit = true;
-    wasConnected = isConnected;
-  }
+  bool isConnected = (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0));
 
   if (isConnected && !wasConnected) {
     wasConnected = true;
     manualWiFiDisconnected = false;
     preferences.putBool("needAP", false);
-    Serial.printf("[WiFi] Reconnected! IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
     setupMDNS();
     pendingNtpSync = true;
   } else if (!isConnected && wasConnected) {
     wasConnected = false;
-    MDNS.end();
+    if (mdnsRunning) {
+      MDNS.end();
+      mdnsRunning = false;
+    }
     nodeRedConnected = false;
     Serial.println("[WiFi] Connection lost. Switching to offline fallback...");
+  }
+
+  // Ensure mDNS responder is active whenever WiFi is connected and mDNS is enabled
+  if (isConnected && settings.mdnsEnabled && !mdnsRunning) {
+    setupMDNS();
   }
 
   // Non-blocking background reconnect every 30s if not manually disconnected
@@ -2189,16 +2458,20 @@ void maintainWiFiAndServices() {
   if (pendingWiFiDisconnect) {
     pendingWiFiDisconnect = false;
     manualWiFiDisconnected = true;
+    wasConnected = false;
+    if (mdnsRunning) {
+      MDNS.end();
+      mdnsRunning = false;
+    }
+    nodeRedConnected = false;
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(false, false);
-    MDNS.end();
-    nodeRedConnected = false;
   }
 
   if (pendingWiFiForget) {
     pendingWiFiForget = false;
     manualWiFiDisconnected = true;
-    MDNS.end();
+    wasConnected = false;
     nodeRedConnected = false;
     eraseWiFiCredentialsNVS();  // Erases saved WiFi credentials; AP starts on next device restart
     showToastLCD("WiFi Forgotten", "Creds Erased", 1500, UI_DASHBOARD);
@@ -2207,22 +2480,27 @@ void maintainWiFiAndServices() {
   if (pendingWiFiPortal) {
     pendingWiFiPortal = false;
     manualWiFiDisconnected = false;
-    MDNS.end();
+    if (mdnsRunning) {
+      MDNS.end();
+      mdnsRunning = false;
+    }
     server.end();  // Free port 80 for WiFiManager
     delay(100);    // Allow LWIP stack to release port 80
 
-    startAPConfigPortal(180);  // 180 seconds AP timeout
+    bool connected = startAPConfigPortal(180);  // 180 seconds AP timeout
 
-    delay(100);      // Allow WiFiManager to release port 80
-    server.begin();  // Relaunch AsyncWebServer cleanly
-    wasConnected = (WiFi.status() == WL_CONNECTED);
-    if (wasConnected) {
+    if (connected) {
       preferences.putBool("needAP", false);
-      setupMDNS();
-      pendingNtpSync = true;
-      showToastLCD("WiFi Connected", WiFi.localIP().toString().c_str(), 1500, UI_DASHBOARD);
+      char ipStr[24];
+      snprintf(ipStr, sizeof(ipStr), "IP: %s", WiFi.localIP().toString().c_str());
+      drawBootScreen("WIFI CONNECTED", WiFi.SSID().c_str(), ipStr, "Restarting Device...");
+      triggerBeep(100, 2, 80);
+      delay(1500);
+      performSafeRestart();
     } else {
-      showToastLCD("Portal Closed", "Offline Mode", 1500, UI_DASHBOARD);
+      drawBootScreen("PORTAL CLOSED", "Offline Mode", "Relaunching Web...", "Restarting...");
+      delay(1200);
+      performSafeRestart();
     }
   }
 
@@ -2410,8 +2688,20 @@ void drawSubmenuRightValue(int mainIdx, int subIdx) {
       }
       break;
     case 10:  // Main Output
-      if (subIdx == 1) strcpy(val, settings.mainOutput ? "ON" : "OFF");
-      else if (subIdx == 2) strcpy(val, settings.kWhSaver ? "ON" : "OFF");
+      if (subIdx == 1) {
+        if (!settings.mainOutput && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
+          triggerBeep(150, 2, 80);
+          showToastLCD("Not Possible!", "Protec. Running", 1400, UI_SUB_MENU);
+        } else {
+          settings.mainOutput = !settings.mainOutput;
+          saveSettings();
+          showToastLCD("Main Output", settings.mainOutput ? "Turned ON" : "Turned OFF", 1000, UI_SUB_MENU);
+        }
+      } else if (subIdx == 2) {
+        settings.kWhSaver = !settings.kWhSaver;
+        saveSettings();
+        showToastLCD("kWh Saver", settings.kWhSaver ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
+      }
       break;
   }
   if (strlen(val) > 0) {
@@ -3104,22 +3394,6 @@ void updateDisplayAndUI() {
 // ============================================================================
 // PROFESSIONAL BOOT SEQUENCE & SETUP
 // ============================================================================
-void drawBootScreen(const char* header, const char* l1, const char* l2 = "", const char* l3 = "") {
-  u8g2.clearBuffer();
-  u8g2.drawFrame(0, 0, 128, 64);
-  u8g2.drawBox(0, 0, 128, 14);
-  u8g2.setDrawColor(0);
-  u8g2.setFont(u8g2_font_6x12_tf);
-  int hw = u8g2.getStrWidth(header);
-  u8g2.drawStr((128 - hw) / 2, 11, header);
-  u8g2.setDrawColor(1);
-
-  if (strlen(l1) > 0) u8g2.drawStr(6, 29, l1);
-  if (strlen(l2) > 0) u8g2.drawStr(6, 43, l2);
-  if (strlen(l3) > 0) u8g2.drawStr(6, 57, l3);
-  u8g2.sendBuffer();
-}
-
 void bootConnectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -3134,14 +3408,16 @@ void bootConnectWiFi() {
 
   // 1. After Factory Reset, Forget WiFi, or First-Time Start (no saved credentials) -> Launch AP 'EnergyLog'
   if (needAP || !hasSavedCreds) {
-    startAPConfigPortal(180);
+    bool connected = startAPConfigPortal(180);
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (connected) {
       preferences.putBool("needAP", false);
       char ipStr[24];
       snprintf(ipStr, sizeof(ipStr), "IP: %s", WiFi.localIP().toString().c_str());
-      drawBootScreen("NETWORK ONLINE", "WiFi Configured", WiFi.SSID().c_str(), ipStr);
+      drawBootScreen("WIFI CONNECTED", WiFi.SSID().c_str(), ipStr, "Restarting Device...");
+      triggerBeep(100, 2, 80);
       delay(1500);
+      performSafeRestart();  // Mandatory safe restart to cleanly launch AsyncWebServer on port 80
     } else {
       drawBootScreen("OFFLINE MODE", "WiFi Not Configured", "Local Control Ready", "AP Closed");
       delay(1500);
@@ -3150,6 +3426,12 @@ void bootConnectWiFi() {
   }
 
   // 2. Normal Boot with Saved Credentials
+  String host = String(settings.mdnsHostname);
+  host.trim();
+  host.toLowerCase();
+  if (host.length() == 0) host = getDefaultMdnsName();
+  WiFi.setHostname(host.c_str());
+
   WiFi.begin();
   String targetSsid = String(reinterpret_cast<const char*>(conf.sta.ssid));
   const int MAX_ATTEMPTS = 5;
@@ -3253,6 +3535,16 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_DT), encoderISR, CHANGE);
   setEncoderPos(0);
+
+  // Initialize WiFi STA early so WiFi.macAddress() is valid before loadSettings()
+  WiFi.mode(WIFI_STA);
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+      pendingMdnsRestart = true;
+    } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      mdnsRunning = false;
+    }
+  });
 
   bool spiffsOk = SPIFFS.begin(true);
   preferences.begin("energy-meter", false);
