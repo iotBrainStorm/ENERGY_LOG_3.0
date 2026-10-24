@@ -967,8 +967,6 @@ void updateNtpSilently() {
 }
 
 bool isProtectionRunning() {
-  if (protectionWasActive) return true;
-
   portENTER_CRITICAL(&measureMux);
   Measurements cur = readings;
   portEXIT_CRITICAL(&measureMux);
@@ -996,12 +994,14 @@ void checkTimersAndSchedules() {
     if ((long)(millis() - quickTimerEndMillis) >= 0) {
       quickTimerActive = false;
       if (quickTimerTurnOn) {
-        // Only turn ON if no protection is currently active/running
+        // Only allow ON if no live fault is active; if in countdown, wait for countdown to finish
         if (!isProtectionRunning()) {
           settings.mainOutput = true;
-          shouldTurnOff = false;
           saveSettings();
-          triggerBeep(200, 2, 100);
+          if (!protectionWasActive) {
+            shouldTurnOff = false;
+            triggerBeep(200, 2, 100);
+          }
         } else {
           Serial.println("[Timer] Skipped ON: Protection is currently active!");
           triggerBeep(120, 3, 80);
@@ -1030,9 +1030,13 @@ void checkTimersAndSchedules() {
       if (dailySchedules[i].turnOn) {
         if (!isProtectionRunning()) {
           settings.mainOutput = true;
-          shouldTurnOff = false;
           saveSettings();
-          triggerBeep(120, 2, 80);
+          // Only beep immediately if not waiting on protection countdown
+          // (controlMainOutput will beep when the countdown finishes)
+          if (!protectionWasActive) {
+            shouldTurnOff = false;
+            triggerBeep(120, 2, 80);
+          }
         }
       } else {
         settings.mainOutput = false;
@@ -1049,9 +1053,11 @@ void checkTimersAndSchedules() {
       if (futureSchedules[i].turnOn) {
         if (!isProtectionRunning()) {
           settings.mainOutput = true;
-          shouldTurnOff = false;
           saveSettings();
-          triggerBeep(120, 2, 80);
+          if (!protectionWasActive) {
+            shouldTurnOff = false;
+            triggerBeep(120, 2, 80);
+          }
         }
       } else {
         settings.mainOutput = false;
@@ -1170,7 +1176,6 @@ void controlMainOutput() {
   if (faultActive) {
     if (!protectionWasActive || waitingForDelay || strcmp(protName, currentFaultReason) != 0) {
       recordProtectionTrigger(currentFaultReason);
-      triggerBeep(200, 3, 80);
     }
     protectionWasActive = true;
     waitingForDelay = false;  // Reset countdown until fault releases
@@ -1515,7 +1520,7 @@ void setupWebServerRoutes() {
     doc["mdnsEnabled"] = settings.mdnsEnabled;
     doc["mdnsHostname"] = settings.mdnsHostname;
     doc["gmtOffset"] = settings.gmtOffset;
-    doc["mainOutput"] = settings.mainOutput;
+    doc["mainOutput"] = relayPhysicalOn;
     doc["kWhSaver"] = settings.kWhSaver;
     doc["afpcEnabled"] = settings.afpcEnabled;
     doc["targetFactor"] = settings.targetFactor;
@@ -1566,10 +1571,17 @@ void setupWebServerRoutes() {
       StaticJsonDocument<128> doc;
       if (!deserializeJson(doc, data, len)) {
         bool state = doc["state"];
-        if (state && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
-          triggerBeep(150, 2, 80);
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
-          return;
+        if (state) {
+          if (isProtectionRunning()) {
+            triggerBeep(150, 2, 80);
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+            return;
+          }
+          // Fault is already released: cancel countdown and engage output immediately
+          protectionWasActive = false;
+          waitingForDelay = false;
+          strcpy(protPhase, "none");
+          protRemainingSec = 0;
         }
         settings.mainOutput = state;
         saveSettings();
@@ -1592,10 +1604,16 @@ void setupWebServerRoutes() {
       String key = doc["key"] | "";
       if (key == "mainOutput") {
         bool reqState = doc["value"].as<bool>();
-        if (reqState && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
-          triggerBeep(150, 2, 80);
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
-          return;
+        if (reqState) {
+          if (isProtectionRunning()) {
+            triggerBeep(150, 2, 80);
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+            return;
+          }
+          protectionWasActive = false;
+          waitingForDelay = false;
+          strcpy(protPhase, "none");
+          protRemainingSec = 0;
         }
         settings.mainOutput = reqState;
       } else if (key == "kWhSaver") settings.kWhSaver = doc["value"].as<bool>();
@@ -1648,11 +1666,17 @@ void setupWebServerRoutes() {
       if (!deserializeJson(doc, data, len)) {
         bool reqMain = doc["mainOutput"] | settings.mainOutput;
         settings.kWhSaver = doc["kWhSaver"] | settings.kWhSaver;
-        if (reqMain && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
-          saveSettings();
-          triggerBeep(150, 2, 80);
-          request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
-          return;
+        if (reqMain) {
+          if (isProtectionRunning()) {
+            saveSettings();
+            triggerBeep(150, 2, 80);
+            request->send(400, "application/json", "{\"success\":false,\"error\":\"Not possible! Protection Running\"}");
+            return;
+          }
+          protectionWasActive = false;
+          waitingForDelay = false;
+          strcpy(protPhase, "none");
+          protRemainingSec = 0;
         }
         settings.mainOutput = reqMain;
         saveSettings();
@@ -2416,6 +2440,7 @@ void maintainWiFiAndServices() {
   if (isConnected && !wasConnected) {
     wasConnected = true;
     manualWiFiDisconnected = false;
+    pendingMdnsRestart = false;  // Prevent duplicate mDNS restart in the same loop
     preferences.putBool("needAP", false);
     Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
     setupMDNS();
@@ -2688,20 +2713,8 @@ void drawSubmenuRightValue(int mainIdx, int subIdx) {
       }
       break;
     case 10:  // Main Output
-      if (subIdx == 1) {
-        if (!settings.mainOutput && (isProtectionRunning() || strcmp(protPhase, "none") != 0)) {
-          triggerBeep(150, 2, 80);
-          showToastLCD("Not Possible!", "Protec. Running", 1400, UI_SUB_MENU);
-        } else {
-          settings.mainOutput = !settings.mainOutput;
-          saveSettings();
-          showToastLCD("Main Output", settings.mainOutput ? "Turned ON" : "Turned OFF", 1000, UI_SUB_MENU);
-        }
-      } else if (subIdx == 2) {
-        settings.kWhSaver = !settings.kWhSaver;
-        saveSettings();
-        showToastLCD("kWh Saver", settings.kWhSaver ? "Enabled" : "Disabled", 1000, UI_SUB_MENU);
-      }
+      if (subIdx == 1) strcpy(val, relayPhysicalOn ? "ON" : "OFF");
+      else if (subIdx == 2) strcpy(val, settings.kWhSaver ? "ON" : "OFF");
       break;
   }
   if (strlen(val) > 0) {
@@ -2882,13 +2895,27 @@ void handleSubmenuAction(int mainIdx, int subIdx) {
 
     case 10:  // Main Output
       if (subIdx == 1) {
-        settings.mainOutput = !settings.mainOutput;
-        if (settings.mainOutput) {
+        // 1. If an active fault is still present, block turning ON
+        if (!relayPhysicalOn && isProtectionRunning()) {
+          triggerBeep(150, 2, 80);
+          showToastLCD("Not Possible!", "Protec. Running", 1400, UI_SUB_MENU);
+        }
+        // 2. If fault is released and countdown is running, cancel countdown & turn ON
+        else if (protectionWasActive || waitingForDelay) {
           protectionWasActive = false;
           waitingForDelay = false;
+          strcpy(protPhase, "none");
+          protRemainingSec = 0;
+          settings.mainOutput = true;
+          saveSettings();
+          showToastLCD("Main Output", "Turned ON", 1000, UI_SUB_MENU);
         }
-        saveSettings();
-        showToastLCD("Main Output", settings.mainOutput ? "Turned ON" : "Turned OFF", 1000, UI_SUB_MENU);
+        // 3. Normal operation: toggle ON / OFF
+        else {
+          settings.mainOutput = !settings.mainOutput;
+          saveSettings();
+          showToastLCD("Main Output", settings.mainOutput ? "Turned ON" : "Turned OFF", 1000, UI_SUB_MENU);
+        }
       } else if (subIdx == 2) {
         settings.kWhSaver = !settings.kWhSaver;
         saveSettings();
@@ -3571,9 +3598,9 @@ void setup() {
   // 7. Start Web Server, mDNS & Power On PZEM Sensor
   drawBootScreen("STARTING SERVICES", "Server : Port 80", "AC Sensor  : ON", "Initializing...");
   setupWebServerRoutes();
-  if (WiFi.status() == WL_CONNECTED) {
-    setupMDNS();
-  }
+  // if (WiFi.status() == WL_CONNECTED) {
+  //   setupMDNS();
+  // }
 
   digitalWrite(PZEM_RELAY, LOW);  // Power ON PZEM sensor
   delay(1500);                    // Allow PZEM-004T to stabilize

@@ -1724,7 +1724,7 @@
                       ESP Data Sharing
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      ESP-to-ESP sync interval (1–300s)
+                      ESP-to-ESP sync(1–300s)
                     </div>
                   </div>
                   <div
@@ -1747,10 +1747,10 @@
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Node-RED Push Interval
+                      Node-RED Push
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Payload transmit frequency (5–300s)
+                      Payload transmit freq. (5–300s)
                     </div>
                   </div>
                   <div
@@ -1776,7 +1776,7 @@
                       PZEM Sensor Polling
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Meter hardware read interval (1–60s)
+                      Reading interval (1–60s)
                     </div>
                   </div>
                   <div
@@ -1799,10 +1799,10 @@
                 <div class="py-4 flex items-center justify-between gap-4">
                   <div>
                     <div class="text-xs font-medium text-slate-200">
-                      Safety Alert Check
+                      Safety Alert Beep
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Interval between buzzer alerts (15–600s)
+                      Buzzer alerts interval (15–600s)
                     </div>
                   </div>
                   <div
@@ -1829,7 +1829,7 @@
                       Protection Recovery Delay
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Wait time before restoring output after trip
+                      Wait after protection released
                     </div>
                   </div>
                   <div
@@ -2103,8 +2103,7 @@
                       Reset All Parameters &amp; Data
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      Restore default parameters, schedules &amp; kWh (Hold BOOT
-                      15s)
+                      Parameters, Schedules &amp; kWh
                     </div>
                   </div>
                   <button
@@ -2127,8 +2126,7 @@
                       Factory Reset All Settings
                     </div>
                     <div class="text-[11px] text-slate-500">
-                      All Reset Data parameters, WiFi &amp; users (Hold BOOT
-                      15s)
+                      Data Reset, WiFi &amp; Users
                     </div>
                   </div>
                   <button
@@ -2198,8 +2196,7 @@
                   ></div>
                 </div>
                 <div class="text-[11px] text-slate-500 mt-2">
-                  Internal silicon die sensor (normal operating range: 35°C –
-                  75°C)
+                  Normal operating range: 35°C – 75°C
                 </div>
               </div>
 
@@ -2211,7 +2208,7 @@
                   <span
                     class="text-xs font-semibold uppercase tracking-wider text-slate-300"
                   >
-                    RAM (Heap) Usage
+                    RAM Usage
                   </span>
                   <span
                     id="stat-ram-pct"
@@ -3396,15 +3393,10 @@
               fetch("/sensor.json")
                 .then((r) => r.json())
                 .then((s) => {
+                  window.currentProtPhase = s.protPhase || "none";
                   const outEl = document.getElementById("main-output");
-                  const isProtActive = s.protPhase && s.protPhase !== "none";
-                  const settingVal = isProtActive
-                    ? 0
-                    : s.mainOutput !== undefined
-                      ? s.mainOutput
-                      : s.mainOutputSetting;
-                  if (outEl && settingVal !== undefined) {
-                    outEl.checked = settingVal === 1 || settingVal === true;
+                  if (outEl && s.mainOutput !== undefined) {
+                    outEl.checked = s.mainOutput === 1 || s.mainOutput === true;
                   }
                 })
                 .catch(() => {});
@@ -5018,6 +5010,16 @@
           var original = window[name];
           if (typeof original === "function") {
             window[name] = function () {
+              // If saving Main Output ON while a live fault is active (not "none" and not "wait"), block immediately
+              if (name === "saveOutputSettings") {
+                var wantOn = document.getElementById("main-output").checked;
+                var phase = window.currentProtPhase || "none";
+                if (wantOn && phase !== "none" && phase !== "wait") {
+                  setCheckbox("main-output", false);
+                  showToast("Not possible! Protection Running", "error");
+                  return;
+                }
+              }
               var args = arguments;
               var self = this;
               requireAdmin(function () {
