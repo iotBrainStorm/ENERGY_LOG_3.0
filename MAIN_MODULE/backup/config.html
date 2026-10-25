@@ -104,10 +104,16 @@
         background-color: #ffffff;
       }
 
+      /* Enable dark native OS dropdowns */
+      html.dark {
+        color-scheme: dark;
+      }
+
       /* Modal Overlay */
       .modal-overlay {
         opacity: 0;
         visibility: hidden;
+        pointer-events: none;
         transition:
           opacity 0.2s ease,
           visibility 0.2s ease;
@@ -115,13 +121,14 @@
       .modal-overlay.active {
         opacity: 1;
         visibility: visible;
+        pointer-events: auto;
       }
       .modal-overlay .modal-box {
         transform: scale(0.96) translateY(8px);
         transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       }
       .modal-overlay.active .modal-box {
-        transform: scale(1) translateY(0);
+        transform: none;
       }
 
       /* Hide scrollbar while keeping touch scrolling active */
@@ -2462,7 +2469,7 @@
               >
                 <span
                   class="text-xs font-semibold uppercase tracking-wider text-slate-300"
-                  >Daily Schedules (Persistent)</span
+                  >Daily Schedules</span
                 >
                 <button
                   onclick="showAddScheduleModal()"
@@ -2490,7 +2497,7 @@
               >
                 <span
                   class="text-xs font-semibold uppercase tracking-wider text-slate-300"
-                  >One-Time Future Schedules</span
+                  >Future Schedules</span
                 >
                 <button
                   onclick="showAddFutureScheduleModal()"
@@ -2824,14 +2831,22 @@
           <div>
             <label
               class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
-              >Trigger Time</label
+              >Trigger Time (Hour : Minute)</label
             >
-            <input
-              type="time"
-              id="schedule-time"
-              value="08:00"
-              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-sm font-mono text-white text-center outline-none"
-            />
+            <div class="grid grid-cols-2 gap-2">
+              <select
+                id="sched-hr"
+                onchange="syncCustomTime('sched')"
+                class="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+              ></select>
+              <select
+                id="sched-min"
+                onchange="syncCustomTime('sched')"
+                class="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+              ></select>
+            </div>
+            <!-- Hidden input keeps the exact format your JS & ESP32 expect -->
+            <input type="hidden" id="schedule-time" value="08:00" />
           </div>
 
           <div>
@@ -2965,26 +2980,36 @@
         <div class="space-y-4">
           <div>
             <label
+              for="future-date"
               class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
-              >Date</label
+              >Select Date</label
             >
             <input
               type="date"
               id="future-date"
-              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+              onclick="this.showPicker && this.showPicker()"
+              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white outline-none cursor-pointer"
             />
           </div>
           <div>
             <label
               class="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
-              >Time</label
+              >Time (Hour : Minute)</label
             >
-            <input
-              type="time"
-              id="future-time"
-              value="08:00"
-              class="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-sm font-mono text-white text-center outline-none"
-            />
+            <div class="grid grid-cols-2 gap-2">
+              <select
+                id="fut-hr"
+                onchange="syncCustomTime('fut')"
+                class="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+              ></select>
+              <select
+                id="fut-min"
+                onchange="syncCustomTime('fut')"
+                class="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl text-xs font-mono text-white text-center outline-none"
+              ></select>
+            </div>
+            <!-- Hidden input stores HH:MM for saveFutureSchedule() -->
+            <input type="hidden" id="future-time" value="08:00" />
           </div>
           <div>
             <label
@@ -4557,7 +4582,9 @@
         document.getElementById("schedule-modal").classList.remove("active");
       }
 
-      function toggleDay(pill) {
+      function toggleDay(pill, e) {
+        const evt = e || window.event;
+        if (evt) evt.preventDefault(); // Prevents <label> from double-toggling the hidden checkbox
         const checkbox = pill.querySelector('input[type="checkbox"]');
         checkbox.checked = !checkbox.checked;
         pill.classList.toggle("active", checkbox.checked);
@@ -4673,12 +4700,54 @@
         return days.map((d) => names[d]).join(", ");
       }
 
+      // Populate Hour & Minute dropdowns
+      function initMobileSchedulePickers() {
+        const hrs = Array.from({ length: 24 }, (_, i) => {
+          const val = String(i).padStart(2, "0");
+          return `<option value="${val}">${val} hr</option>`;
+        }).join("");
+
+        const mins = Array.from({ length: 60 }, (_, i) => {
+          const val = String(i).padStart(2, "0");
+          return `<option value="${val}">${val} min</option>`;
+        }).join("");
+
+        ["sched", "fut"].forEach((prefix) => {
+          const hEl = document.getElementById(prefix + "-hr");
+          const mEl = document.getElementById(prefix + "-min");
+          if (hEl && mEl) {
+            hEl.innerHTML = hrs;
+            mEl.innerHTML = mins;
+            hEl.value = "08";
+            mEl.value = "00";
+            syncCustomTime(prefix);
+          }
+        });
+      }
+
+      // Updates hidden #schedule-time or #future-time input (HH:MM)
+      function syncCustomTime(prefix) {
+        const hEl = document.getElementById(prefix + "-hr");
+        const mEl = document.getElementById(prefix + "-min");
+        if (!hEl || !mEl) return;
+        const targetId = prefix === "sched" ? "schedule-time" : "future-time";
+        document.getElementById(targetId).value = `${hEl.value}:${mEl.value}`;
+      }
+
       function showAddFutureScheduleModal() {
         const now = new Date();
-        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        document.getElementById("future-date").value = now
-          .toISOString()
-          .split("T")[0];
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const d = String(now.getDate()).padStart(2, "0");
+        const todayStr = `${y}-${m}-${d}`;
+
+        const dateInput = document.getElementById("future-date");
+        if (dateInput) {
+          dateInput.min = todayStr; // Prevents picking past dates
+          dateInput.value = todayStr;
+        }
+        syncCustomTime("fut");
+
         document
           .getElementById("future-schedule-modal")
           .classList.add("active");
@@ -4963,6 +5032,7 @@
       // Initialize
       document.addEventListener("DOMContentLoaded", () => {
         updateMdnsUI();
+        initMobileSchedulePickers();
         document
           .getElementById("login-password")
           .addEventListener("keydown", (e) => {
