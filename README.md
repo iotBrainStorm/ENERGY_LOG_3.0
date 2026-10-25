@@ -1,435 +1,155 @@
-<div align="center">
-
-# ⚡ ENERGY LOG 2.0
-
-### Advanced ESP32-Based Energy Monitoring System
-
-[![ESP32](https://img.shields.io/badge/ESP32-Dual%20Core-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
-[![Arduino](https://img.shields.io/badge/Arduino-IDE-00979D.svg)](https://www.arduino.cc/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.0-orange.svg)](https://github.com/yourusername/ENERGY_LOG_2.0)
-
-_Real-time power monitoring • Firebase Integration • Web Dashboard • OLED Display_
-
-[Features](#-features) • [Hardware](#%EF%B8%8F-hardware-requirements) • [Installation](#-installation) • [Usage](#-usage) • [Screenshots](#-screenshots) • [Contributing](#-contributing)
-
-</div>
+⚡ EnergyLog: Advanced Smart Power Monitor & Controller
+EnergyLog is a robust, dual-ESP32 based smart energy monitoring and protection system. It provides real-time electrical telemetry (Voltage, Current, Power, Energy, Frequency, Power Factor), advanced grid protection mechanisms, Automatic Power Factor Correction (AFPC), and a comprehensive web-based dashboard.
+The system utilizes a primary ESP32 for core logic, web hosting, and sensor data acquisition, paired with a secondary ESP32 dedicated to driving an external LCD and managing up to 16 capacitor banks for reactive power compensation.
 
 ---
 
-## 🌟 Overview
-
-**ENERGY LOG 2.0** is a professional-grade energy monitoring solution built on the ESP32 platform. It combines precision measurement hardware with an intuitive web interface and real-time data visualization, making power consumption tracking accessible and actionable.
-
-### Why ENERGY LOG 2.0?
-
-- 📊 **Real-time Monitoring**: Track voltage, current, power, energy, frequency, and power factor
-- 🌐 **Web Dashboard**: Beautiful, responsive interface accessible from any device
-- 🔥 **Firebase Integration**: Cloud data logging with real-time synchronization
-- 🖥️ **OLED Display**: Local monitoring with rotary encoder navigation
-- 🔒 **Safety Features**: Overvoltage/undervoltage/overpower protection with configurable delays
-- 📡 **Dual ESP Communication**: Main controller + secondary ESP for extended functionality
-- 💾 **Data Persistence**: EEPROM storage for settings and cumulative energy tracking
-- 🎯 **kWh Saver**: Automatic load control based on energy consumption limits
+📑 Table of Contents
+Key Features
+System Architecture
+Hardware Requirements
+Pin Configuration
+Software Dependencies
+Installation & Setup
+Usage & Interface
+Automation & Protections
+License
 
 ---
 
-## ✨ Features
-
-### 📈 Monitoring Capabilities
-
-- ⚡ **Voltage** (V) - Real-time AC voltage measurement
-- 🔌 **Current** (A) - Precise current sensing up to 100A
-- 💡 **Power** (W) - Active power calculation
-- 🔋 **Energy** (kWh) - Cumulative energy consumption tracking
-- 📊 **Power Factor** (PF) - Reactive power analysis
-- 〰️ **Frequency** (Hz) - Mains frequency monitoring
-- ⏱️ **Uptime** - System runtime tracking
-- 📅 **Total Days** - Long-term operation logging
-
-### 🛡️ Protection & Safety
-
-- ⚠️ **High/Low Voltage Protection** - Automatic relay cutoff
-- ⚠️ **Overpower Protection** - Load limiting
-- ⚠️ **Frequency Deviation Protection** - Mains stability monitoring
-- 🔔 **Configurable Alerts** - Buzzer + visual notifications
-- ⏲️ **Protection Delay Timer** - Prevents nuisance tripping
-- 🔄 **Manual Override** - Emergency control via push button
-
-### 🌐 Connectivity & Integration
-
-- 📱 **WiFi Manager** - Easy network configuration via captive portal
-- 🔥 **Firebase Realtime Database** - Cloud data logging and remote control
-- 🌊 **Node-RED Integration** - IoT platform compatibility
-- 🔗 **RESTful API** - JSON endpoints for external systems
-- 📡 **ESP-to-ESP Communication** - UART data sharing
-
-### 🖥️ User Interfaces
-
-- **Web Dashboard**
-
-  - Real-time data visualization with animated charts
-  - Responsive design (mobile/tablet/desktop)
-  - Firebase configuration panel
-  - Main output control with confirmation dialogs
-  - Live status indicators (WiFi, Node-RED, Firebase, Protection, Alerts)
-
-- **OLED Display (128×64)**
-  - Multi-screen layout with live readings
-  - Rotary encoder navigation
-  - Interactive menu system
-  - Date/time display (NTP synchronized)
-  - Status bar with connectivity icons
-
-### ⚙️ Advanced Settings
-
-- 🎛️ **AFPC (Automatic Factor Power Correction)** - Smart load management
-- 🔋 **kWh Saver Mode** - Auto-shutoff at energy limit
-- 🔊 **Buzzer Control** - Configurable audio alerts
-- ⏰ **Startup Delay** - Safety check before relay activation
-- 📊 **Adjustable Thresholds** - Custom voltage/power/frequency limits
-- ⏱️ **Configurable Intervals** - PZEM reading, Node-RED, Firebase, alerts
+🌟 Key Features
+🔌 Real-Time Power Monitoring
+Integrates with the PZEM-004Tv30 sensor for high-accuracy AC telemetry.
+Tracks Voltage (V), Current (A), Power (W), Energy (kWh), Frequency (Hz), and Power Factor (PF).
+Calculates exact billing days/uptime via accurate NTP synchronization.
+🛡️ Advanced Safety Protections
+Auto-Cutoff: Safely cuts the main relay upon detecting High/Low Voltage, High Power Overload, or Frequency anomalies.
+Recovery Delay: Configurable countdown timer before restoring power after a grid fault clears.
+kWh Saver: Automatically cuts power when a user-defined energy quota (Max kWh) is reached.
+Instant Alerts: Triggers local buzzer and visual indicators immediately upon anomaly detection.
+⚡ Automatic Power Factor Correction (AFPC)
+Intelligently calculates required Microfarads (MFD) to achieve a target Power Factor.
+Drives up to 16 sequential capacitor banks via a 74HC595 shift register.
+Includes dead-band hysteresis and low-wattage cutoffs to prevent relay chattering.
+🌐 Comprehensive Web Dashboard & Connectivity
+Asynchronous Web Server: Fast, non-blocking UI served from SPIFFS (supports GZIP).
+Security: Role-based authentication (Admin/User) with a 3-attempt brute-force lockout.
+Automation: Daily scheduling (by days of the week), Future date scheduling, and Quick Countdown timers.
+Integrations: Built-in mDNS (`energylog.local`) and direct HTTP POST streaming to Node-RED/InfluxDB.
+🎛️ Dual Local Interfaces
+Primary Unit: ST7920 128x64 graphical OLED/LCD with a Rotary Encoder for deep menu navigation without a PC.
+Secondary Unit: 16x2 I2C LCD for glanceable telemetry, accompanied by proportional Watt-pulse and Protection LEDs.
 
 ---
 
-## 🛠️ Hardware Requirements
-
-### Core Components
-
-| Component             | Specification             | Purpose             |
-| --------------------- | ------------------------- | ------------------- |
-| **ESP32 DevKit**      | Dual-core 240MHz, WiFi/BT | Main controller     |
-| **PZEM-004T v3.0**    | AC 80-260V, 0-100A        | Energy meter sensor |
-| **U8G2 OLED Display** | 128×64, I2C               | Local UI            |
-| **Rotary Encoder**    | KY-040 or similar         | Menu navigation     |
-| **Relay Module**      | 5V, 10A+ (active-low)     | Load control        |
-| **Buzzer**            | 5V active                 | Audio alerts        |
-| **Push Button**       | Normally open             | Emergency override  |
-
-### Pin Configuration
-
-```cpp
-// GPIO Assignments
-#define MAIN_RELAY      26  // Main output relay (active-low)
-#define PZEM_RELAY      27  // PZEM sensor power control
-#define RESET_BTN       14  // Protection reset button
-#define ENCODER_SW      33  // Rotary encoder switch
-#define BUZZER_PIN      25  // Alert buzzer
-#define ESP_COMM_RX     13  // Secondary ESP RX
-#define ESP_COMM_TX     12  // Secondary ESP TX
-
-// I2C (OLED)
-#define SDA_PIN         22
-#define SCL_PIN         23
-
-// PZEM-004T (UART)
-#define PZEM_RX         16
-#define PZEM_TX         17
-```
-
-### Power Supply
-
-- **ESP32**: 5V/1A USB or regulated DC
-- **PZEM-004T**: Powered from monitored AC line
-- **Relay**: 5V from ESP32 (ensure adequate current rating)
+🏗️ System Architecture
+The project is split across two microcontrollers communicating via a dedicated UART serial link.
+Main ESP32 (Controller): Handles WiFi, Web UI, NTP Time, PZEM sensor reading, primary relay control, OLED display, and the Rotary Encoder menu.
+Secondary ESP32 (Display/AFPC Driver): Receives telemetry JSON via serial. It handles the 16x2 LCD UI, visual LED alerts, and translates PF data into shift-register outputs (74HC595) to toggle physical AFPC relays.
 
 ---
 
-## 📦 Installation
-
-### 1️⃣ Arduino IDE Setup
-
-```bash
-# Install ESP32 board support
-# File → Preferences → Additional Board Manager URLs:
-https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-
-# Tools → Board → Boards Manager → Search "ESP32" → Install
-```
-
-### 2️⃣ Library Dependencies
-
-Install via Arduino Library Manager:
-
-```
-WiFiManager      (tzapu)
-ESPAsyncWebServer (me-no-dev)
-ArduinoJson      (Benoit Blanchon)
-U8g2             (olikraus)
-PZEM004Tv30      (mandulaj)
-RotaryEncoder    (mathertel)
-```
-
-### 3️⃣ File System Setup
-
-```bash
-# Install SPIFFS plugin for Arduino IDE
-# Upload web files to ESP32:
-# Tools → ESP32 Sketch Data Upload
-
-# Required files in /data folder:
-├── index.html       # Main dashboard
-├── style.css        # Styling
-├── firebase.html    # Firebase configuration page
-├── plug_icon.svg    # Favicon
-└── table.svg        # UI assets
-```
-
-### 4️⃣ Upload Firmware
-
-```bash
-# 1. Connect ESP32 via USB
-# 2. Select board: ESP32 Dev Module
-# 3. Upload speed: 921600
-# 4. Flash size: 4MB (3MB APP / 1MB SPIFFS)
-# 5. Upload code
-```
+🛠️ Hardware Requirements
+2x ESP32 Development Boards (e.g., NodeMCU-32S)
+1x PZEM-004Tv30 AC Energy Measurement Module
+1x ST7920 128x64 Display (Primary UI)
+1x 16x2 I2C LCD (Secondary UI)
+1x Rotary Encoder (with push-button)
+1x 74HC595 Shift Register IC
+Relay Modules (2 for main/PZEM control, up to 16 for AFPC)
+Active Buzzer, Push buttons, and LEDs
 
 ---
 
-## 🚀 Usage
-
-### Initial Setup
-
-1. **Power On**: ESP32 will start WiFi Manager if no credentials saved
-2. **Connect**: Join WiFi network `ESP32-ENERGY-MONITOR`
-3. **Configure**: Browser opens automatically → Select your WiFi → Enter password
-4. **Access**: Note IP address shown on OLED display
-
-### Web Dashboard
-
-```
-http://<ESP32-IP-ADDRESS>/
-```
-
-- View real-time measurements
-- Configure Firebase integration
-- Control main output relay
-- Monitor system status
-
-### Menu Navigation (OLED)
-
-```
-Push Button → Enter Menu
-Rotate Encoder → Navigate
-Push Encoder → Select/Confirm
-```
-
-**Menu Structure**:
-
-```
-Main Menu
-├── Settings
-│   ├── WiFi Setup
-│   ├── Node-RED Config
-│   ├── Buzzer Control
-│   ├── Startup Delay
-│   └── Intervals
-├── Protection
-│   ├── Voltage Limits
-│   ├── Power Limits
-│   ├── Frequency Limits
-│   └── Protection Delay
-├── Alerts
-│   ├── Voltage Alerts
-│   ├── Power Alerts
-│   └── Frequency Alerts
-├── Main Output Control
-│   ├── Enable/Disable
-│   └── kWh Saver
-└── AFPC Settings
-```
-
-### Firebase Integration
-
-1. Navigate to `http://<ESP32-IP>/firebase`
-2. Enter Firebase Realtime Database URL
-3. Paste authentication token
-4. Set data upload interval
-5. Test connection → Enable
-
-**Firebase Structure**:
-
-```json
-{
-  "energy_data": {
-    "voltage": 230.5,
-    "current": 1.25,
-    "power": 287.5,
-    "energy": 12.34,
-    "frequency": 50.02,
-    "pf": 0.98,
-    "uptime": 145.2,
-    "totalDays": 3.5,
-    "output": 1,
-    "timestamp": 1234567890
-  }
-}
-```
+📌 Pin Configuration
+Primary ESP32 (Main Node)
+Component ESP32 Pin Description
+Main Relay `GPIO 19` Active LOW (Controls main load)
+PZEM Relay `GPIO 21` Active LOW (Powers PZEM sensor)
+Buzzer `GPIO 13` Active HIGH
+Reset Button `GPIO 35` External push button (Active HIGH)
+Encoder CLK `GPIO 32` Rotary Encoder Clock
+Encoder DT `GPIO 33` Rotary Encoder Data
+Encoder SW `GPIO 34` Rotary Encoder Button (Active LOW)
+PZEM-004T `TX: 16` / `RX: 17` Connect to PZEM RX / TX
+ESP Serial Link `TX: 25` / `RX: 26` Connect to Secondary ESP32 RX/TX
+ST7920 Display Multiple `E=18`, `RW=23`, `RS=5`, `RST=22` (SW SPI)
+Secondary ESP32 (AFPC Node)
+Component ESP32 Pin Description
+ESP Serial Link `TX: 25` / `RX: 26` Connect to Primary ESP32 RX/TX
+16x2 LCD `I2C Pins` Standard SDA/SCL (Address `0x27`)
+Watt LED `GPIO 17` Pulses proportional to power usage
+Process LED `GPIO 18` Blinks on serial packet receipt
+Protec LED `GPIO 19` High when active protection tripped
+74HC595 Data `GPIO 14` Shift Register Serial Data (DS)
+74HC595 Clock `GPIO 27` Shift Register Clock (SHCP)
+74HC595 Latch `GPIO 16` Shift Register Latch (STCP)
+74HC595 OE `GPIO 4` Output Enable (Active LOW, use 10k pull-up)
 
 ---
 
-## 📸 Screenshots
-
-### Web Dashboard
-
-![Dashboard](docs/images/dashboard.png)
-_Real-time monitoring with live graphs and status indicators_
-
-### OLED Display
-
-![OLED](docs/images/oled_display.jpg)
-_Local interface with rotary encoder control_
-
-### Firebase Console
-
-![Firebase](docs/images/firebase_integration.png)
-_Cloud data logging and remote monitoring_
+💻 Software Dependencies
+To compile this project, install the following libraries in your Arduino IDE or PlatformIO environment:
+WiFiManager (Handles initial WiFi AP setup)
+ESPAsyncWebServer (Web Dashboard)
+ArduinoJson (Data formatting & Serial link)
+RotaryEncoder (Menu navigation)
+U8g2 (Primary OLED/LCD graphics)
+PZEM004Tv30 (Sensor communication)
+LiquidCrystal_I2C (Secondary LCD)
 
 ---
 
-## 🔧 Configuration
-
-### EEPROM Memory Map
-
-```cpp
-// Address allocation (512 bytes total)
-#define SETTINGS_FLAG_ADDR      0    // Validation flag
-#define SETTINGS_VERSION_ADDR   1    // Version tracking
-#define SETTINGS_DATA_ADDR      2    // Main settings struct
-#define FB_EEPROM_ADDR          256  // Firebase settings struct
-```
-
-### Default Settings
-
-```cpp
-// Safety Thresholds
-Voltage High:  250.0 V
-Voltage Low:   150.0 V
-Power High:    5000 W
-Frequency High: 51.0 Hz
-Frequency Low:  49.0 Hz
-
-// Timers
-Startup Delay:       60 seconds
-Protection Delay:    1200 seconds (20 min)
-PZEM Read Interval:  1 second
-Node-RED Interval:   30 seconds
-Firebase Interval:   10 seconds
-Alert Interval:      180 seconds
-```
+🚀 Installation & Setup
+Flash the Primary ESP32:
+Open the Main `.ino` file.
+Crucial Step: You must upload the `index.html` and `config.html` files to the ESP32's SPIFFS storage. Use the "ESP32 Sketch Data Upload" tool in Arduino IDE, or PlatformIO's `Upload File System image` task.
+Compile and upload the sketch.
+Flash the Secondary ESP32:
+Open the Secondary `.ino` file.
+Compile and upload the sketch.
+Initial Boot (Captive Portal):
+On first boot, the Main ESP32 will host a WiFi Access Point named `EnergyLog`.
+Connect to this network. A captive portal will appear (or navigate to `192.168.4.1`).
+Enter your local WiFi credentials. The ESP32 will reboot and connect to your network.
+Accessing the Dashboard:
+By default, navigate to `http://energylog.local` in your browser.
+Default Admin Login:
+Username: `esp`
+Password: `456456`
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Development Guidelines
-
-- Follow existing code style
-- Comment complex logic
-- Test on hardware before submitting
-- Update documentation for new features
+⚙️ Usage & Interface
+LCD Menu (Rotary Encoder)
+Click the rotary encoder to enter the menu. You can configure almost all parameters offline, including:
+WiFi Disconnect/Forget
+mDNS and Node-RED configuration
+Adjusting Protections thresholds (V, W, Hz)
+AFPC Target PF and Capacitor sizing
+Factory Resets and Clear Data
+Hardware Boot Button Sequences
+The physical `BOOT` button on the primary ESP32 has built-in safety overrides:
+Resetting Users: Triggered via the Web UI, requires holding the BOOT button for 15 seconds.
+Factory Reset: Can be initiated from the UI or OLED menu, verified by a physical 15-second hold.
 
 ---
 
-## 📝 Changelog
-
-### Version 2.0 (Current)
-
-- ✅ Dual-core architecture (Core 0: Firebase, Core 1: Main tasks)
-- ✅ Firebase bidirectional sync (read/write output state)
-- ✅ Web-based output control with confirmation dialog
-- ✅ Auto-reconnect WiFi after network dropout
-- ✅ Display mutex protection (prevents garbage display)
-- ✅ Yielding delays (eliminates watchdog resets)
-- ✅ Optimized EEPROM operations (256 bytes, error handling)
-- ✅ Enhanced status bar (WiFi, Node-RED, Firebase, Protection, Alerts)
-- ✅ kWh Saver mode with configurable limit
-
-### Version 1.0
-
-- Initial release with basic monitoring
-- OLED display with rotary encoder
-- WiFi Manager integration
-- PZEM-004T sensor support
-
----
-
-## 🐛 Troubleshooting
-
-### ESP32 Restarts After "Starting..."
-
-- **Cause**: Watchdog timer timeout during display operations
-- **Fix**: Firmware now uses yielding delays and display mutex
-
-### "Loading Settings..." Hangs
-
-- **Cause**: EEPROM corruption or size mismatch
-- **Fix**: Flash with `EEPROM.begin(256)` and factory reset code
-
-### Firebase Not Syncing
-
-- **Cause**: Invalid URL or authentication token
-- **Fix**: Verify Firebase URL format: `https://yourproject.firebaseio.com`
-
-### OLED Shows Garbage Values
-
-- **Cause**: Buffer conflicts from multiple threads
-- **Fix**: All display functions now protected with `displayMux`
-
-### Relay Not Responding
-
-- **Cause**: Active-low relay wiring or incorrect pin
-- **Fix**: Verify `LOW = ON`, `HIGH = OFF` logic and GPIO 26 connection
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👨‍💻 Author
-
-**M. Maity**  
-_Embedded Systems Developer_
-
-- GitHub: [@yourusername](https://github.com/yourusername)
-- Email: your.email@example.com
-
----
-
-## 🙏 Acknowledgments
-
-- [PZEM-004T Library](https://github.com/mandulaj/PZEM-004T-v30) by mandulaj
-- [U8g2 Library](https://github.com/olikraus/u8g2) by olikraus
-- [WiFiManager](https://github.com/tzapu/WiFiManager) by tzapu
-- [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) by me-no-dev
-- ESP32 Community for extensive documentation
-
----
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/ENERGY_LOG_2.0&type=Date)](https://star-history.com/#yourusername/ENERGY_LOG_2.0&Date)
-
----
-
-<div align="center">
-
-### 📬 Questions or Issues?
-
-Open an [Issue](https://github.com/yourusername/ENERGY_LOG_2.0/issues) or start a [Discussion](https://github.com/yourusername/ENERGY_LOG_2.0/discussions)
-
-**Made with ❤️ and ESP32**
-
-</div>
+⚖️ License
+MIT License
+Copyright (c) 2024
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
