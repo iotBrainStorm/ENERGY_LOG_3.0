@@ -110,10 +110,13 @@
       }
 
       /* Modal Overlay */
+      /* Modal Overlay */
       .modal-overlay {
         opacity: 0;
         visibility: hidden;
         pointer-events: none;
+        overscroll-behavior: none;
+        touch-action: none;
         transition:
           opacity 0.2s ease,
           visibility 0.2s ease;
@@ -126,9 +129,28 @@
       .modal-overlay .modal-box {
         transform: scale(0.96) translateY(8px);
         transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        touch-action: pan-y;
+        max-height: 90dvh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
       .modal-overlay.active .modal-box {
         transform: none;
+      }
+
+      /* Lock background page scrolling when any modal or mobile drawer is open */
+      #login-modal,
+      #sidebar-overlay {
+        overscroll-behavior: none;
+        touch-action: none;
+      }
+      #login-modal > div {
+        touch-action: pan-y;
+      }
+      html.scroll-locked,
+      html.scroll-locked body {
+        overflow: hidden !important;
+        overscroll-behavior: none !important;
       }
 
       /* Hide scrollbar while keeping touch scrolling active */
@@ -5049,6 +5071,60 @@
           .addEventListener("keydown", (e) => {
             if (e.key === "Enter") confirmAdminVerify();
           });
+        // Lock background scroll whenever any modal or mobile sidebar is open
+        function syncModalScrollLock() {
+          const loginModal = document.getElementById("login-modal");
+          const loginOpen =
+            loginModal &&
+            window.getComputedStyle(loginModal).display !== "none" &&
+            !loginModal.classList.contains("hidden");
+
+          const activeOverlay =
+            document.querySelector(".modal-overlay.active") !== null;
+
+          const sidebarOverlay = document.getElementById("sidebar-overlay");
+          const sidebarOpen =
+            sidebarOverlay && !sidebarOverlay.classList.contains("hidden");
+
+          const shouldLock = loginOpen || activeOverlay || sidebarOpen;
+          document.documentElement.classList.toggle(
+            "scroll-locked",
+            shouldLock,
+          );
+        }
+
+        // Run on load and automatically observe all modals/overlays for state changes
+        document.addEventListener("DOMContentLoaded", () => {
+          syncModalScrollLock();
+
+          const observer = new MutationObserver(syncModalScrollLock);
+          document
+            .querySelectorAll(".modal-overlay, #login-modal, #sidebar-overlay")
+            .forEach((el) => {
+              observer.observe(el, {
+                attributes: true,
+                attributeFilter: ["class", "style"],
+              });
+            });
+
+          // iOS Safari touchmove guard: prevent scrolling on blurred backdrops
+          document.addEventListener(
+            "touchmove",
+            (e) => {
+              if (!document.documentElement.classList.contains("scroll-locked"))
+                return;
+              // Allow scrolling only inside a scrollable modal box or sidebar nav
+              if (
+                e.target.closest(".modal-box") ||
+                e.target.closest("#sidebar nav")
+              ) {
+                return;
+              }
+              e.preventDefault();
+            },
+            { passive: false },
+          );
+        });
       });
 
       // Protect ALL parameter update and control functions with admin verification

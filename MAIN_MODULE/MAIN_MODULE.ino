@@ -893,7 +893,7 @@ void checkBootFactoryReset() {
       }
     } else {
       forgetUserState = FORGET_ABORTED;
-      triggerBeep(150, 2, 80);
+      // triggerBeep(150, 2, 80);
       showToastLCD(getHoldTargetTitle(), "Hold Cancelled", 1500, UI_DASHBOARD);
     }
   }
@@ -924,7 +924,7 @@ void updateNtpSilently() {
     ntpReqState = NTP_REQ_FAILED;
     if (ntpReqFromLCD) {
       ntpReqFromLCD = false;
-      triggerBeep(150, 2, 80);
+      // triggerBeep(150, 2, 80);
       showToastLCD("NTP Sync Failed", "No WiFi Network", 1500, UI_MAIN_MENU);
     }
   }
@@ -943,14 +943,14 @@ void updateNtpSilently() {
         ntpReqFromLCD = false;
         char tStr[20];
         strftime(tStr, sizeof(tStr), "Time: %H:%M:%S", &ti);
-        triggerBeep(80, 1, 0);
+        // triggerBeep(80, 1, 0);
         showToastLCD("Time Updated!", tStr, 1500, UI_MAIN_MENU);
       }
     } else if (now - ntpReqStartMillis >= 6000UL) {
       ntpReqState = NTP_REQ_FAILED;
       if (ntpReqFromLCD) {
         ntpReqFromLCD = false;
-        triggerBeep(150, 2, 80);
+        // triggerBeep(150, 2, 80);
         showToastLCD("NTP Sync Failed", "Server Timeout", 1500, UI_MAIN_MENU);
       }
     }
@@ -1104,16 +1104,27 @@ void updatePzemReadings() {
   float pf = pzem.pf();
   float ut = now / 3600000.0f;
 
-  bool sensorOk = !isnan(v) && !isnan(hz);
+  // Reject NaN AND reject physically impossible transient register values
+  // (PZEM-004T v3.0 hardware range is 80-260V / 45-65Hz; allow 40-400V & 35-75Hz margin)
+  bool vPlausible = !isnan(v) && (v >= 40.0f && v <= 400.0f);
+  bool hzPlausible = !isnan(hz) && (hz >= 35.0f && hz <= 75.0f);
+  bool sensorOk = vPlausible && hzPlausible;
+
+  if (!sensorOk) {
+    // Clear any misaligned bytes in UART2 RX buffer on bad/transient read
+    while (Serial2.available()) {
+      Serial2.read();
+    }
+  }
 
   portENTER_CRITICAL(&measureMux);
   readings.valid = sensorOk;
-  readings.voltage = isnan(v) ? 0.0f : v;
-  readings.current = isnan(c) ? 0.0f : c;
-  readings.power = isnan(p) ? 0.0f : p;
-  if (!isnan(e)) readings.energy = e;
-  readings.frequency = isnan(hz) ? 0.0f : hz;
-  readings.pf = isnan(pf) ? 0.0f : pf;
+  readings.voltage = sensorOk ? v : 0.0f;
+  readings.current = (sensorOk && !isnan(c) && c >= 0.0f && c <= 120.0f) ? c : 0.0f;
+  readings.power = (sensorOk && !isnan(p) && p >= 0.0f && p <= 35000.0f) ? p : 0.0f;
+  if (sensorOk && !isnan(e) && e >= 0.0f) readings.energy = e;
+  readings.frequency = sensorOk ? hz : 0.0f;
+  readings.pf = (sensorOk && !isnan(pf) && pf >= 0.0f && pf <= 1.0f) ? pf : 0.0f;
   readings.uptime = ut;
   readings.totalDays = kwhDays;
   portEXIT_CRITICAL(&measureMux);
@@ -3025,9 +3036,7 @@ void updateDisplayAndUI() {
       u8g2.clearBuffer();
       u8g2.drawFrame(0, 0, 128, 64);
       u8g2.setFont(u8g2_font_7x14B_tr);
-      u8g2.drawStr(14, 30, "SYSTEM ACTIVE");
-      u8g2.setFont(u8g2_font_6x12_tf);
-      u8g2.drawStr(18, 48, "Engaging Output");
+      u8g2.drawStr(16, 39, "SYSTEM ACTIVE");
       u8g2.sendBuffer();
 
       digitalWrite(BUZZER_PIN, HIGH);
@@ -3052,9 +3061,7 @@ void updateDisplayAndUI() {
       u8g2.setDrawColor(1);
 
       if (!cur.valid) {
-        u8g2.drawStr(8, 29, "Waiting for Sensor");
-        u8g2.drawStr(8, 43, "Verify AC Input...");
-        u8g2.drawStr(8, 58, "[Press to Bypass]");
+        u8g2.drawStr(8, 43, "Waiting for Sensor");
       } else {
         char vBuf[24], fBuf[24];
         const char* vStat = (cur.voltage > settings.voltHigh) ? "HIGH" : ((cur.voltage < settings.voltLow) ? "LOW " : "OK  ");
@@ -3076,8 +3083,7 @@ void updateDisplayAndUI() {
           snprintf(tBuf, sizeof(tBuf), "Main ON in: %ds", startupRemainingSec);
           u8g2.drawStr(14, 59, tBuf);
         } else {
-          u8g2.drawStr(6, 51, "FAULT: Output OFF");
-          u8g2.drawStr(6, 61, "Press push to ON");
+          u8g2.drawStr(6, 55, "FAULT: Output OFF");
         }
       }
       u8g2.sendBuffer();
@@ -3461,13 +3467,13 @@ void bootConnectWiFi() {
 
   WiFi.begin();
   String targetSsid = String(reinterpret_cast<const char*>(conf.sta.ssid));
-  const int MAX_ATTEMPTS = 5;
+  const int MAX_ATTEMPTS = 6;
   for (int attempts = 0; attempts < MAX_ATTEMPTS; attempts++) {
     char stepStr[24];
     snprintf(stepStr, sizeof(stepStr), "Attempt %d of %d", attempts + 1, MAX_ATTEMPTS);
     drawBootScreen("NETWORK INIT", "Connecting WiFi...", targetSsid.c_str(), stepStr);
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
       break;
     }
     delay(1500);
@@ -3487,16 +3493,33 @@ void bootConnectWiFi() {
 
 void bootSyncTime() {
   // Skip NTP screen completely if offline
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) return;
 
-  drawBootScreen("CLOCK SYNC", "Contacting NTP...", ntpServer, "Please wait");
-  configTime(settings.gmtOffset, 0, ntpServer, "time.nist.gov", "time.google.com");
+  drawBootScreen("CLOCK SYNC", "Connecting NTP", ntpServer, "Please wait...");
+
+  // Give router ARP & DNS forwarder a brief moment after DHCP IP assignment
+  delay(400);
+
+  // Reset SNTP state and include an IP-literal fallback (162.159.200.1 = Cloudflare NTP)
+  // so slow router DNS on boot never blocks time sync
+  if (esp_sntp_enabled()) {
+    esp_sntp_stop();
+  }
+  sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
+  configTime(settings.gmtOffset, 0, ntpServer, "time.google.com", "162.159.200.1");
 
   struct tm timeinfo;
-  for (int attempts = 0; attempts < 4; attempts++) {
-    if (getLocalTime(&timeinfo, 800) && (timeinfo.tm_year + 1900 >= 2024)) {
+  const int MAX_NTP_TRIES = 8;
+  for (int attempts = 0; attempts < MAX_NTP_TRIES; attempts++) {
+    // Re-trigger SNTP halfway through if the first UDP packet was dropped during ARP warmup
+    if (attempts == 4) {
+      configTime(settings.gmtOffset, 0, "162.159.200.1", ntpServer, "time.nist.gov");
+    }
+
+    if (getLocalTime(&timeinfo, 1000) && (timeinfo.tm_year + 1900 >= 2024)) {
       ntpSynced = true;
       lastNtpSyncMillis = millis();
+      strftime(volatileNtpSyncStr, sizeof(volatileNtpSyncStr), "%d.%m.%Y %H:%M:%S", &timeinfo);
       break;
     }
   }
@@ -3505,10 +3528,10 @@ void bootSyncTime() {
     char timeStr[24], dateStr[24];
     strftime(timeStr, sizeof(timeStr), "Time: %H:%M:%S", &timeinfo);
     strftime(dateStr, sizeof(dateStr), "Date: %d/%m/%Y", &timeinfo);
-    drawBootScreen("CLOCK SYNCED", timeStr, dateStr, "Status: Synchronized");
+    drawBootScreen("CLOCK SYNCED", timeStr, dateStr, "Status: Done");
     delay(1200);
   } else {
-    drawBootScreen("CLOCK SYNC", "NTP Unreachable", "Will sync in bg", "Continuing boot...");
+    drawBootScreen("CLOCK SYNC", "NTP Unreachable", "Continuing boot...", "");
     delay(1000);
   }
 }
@@ -3558,7 +3581,7 @@ void setup() {
   delay(1600);
 
   // 4. Consolidated System Initialization (Encoder, SPIFFS, NVS, Config)
-  drawBootScreen("SYSTEM INIT", "Mounting Storage...", "Loading NVS Config...", "");
+  drawBootScreen("SYSTEM INIT", "Mounting Storage...", "Loading Config...", "");
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_DT), encoderISR, CHANGE);
   setEncoderPos(0);
@@ -3585,7 +3608,7 @@ void setup() {
   loadSchedulesFromNVS();
 
   if (!spiffsOk) {
-    drawBootScreen("STORAGE WARNING", "SPIFFS Mount Error", "Web UI Unavailable", "");
+    drawBootScreen("STORAGE WARNING", "SPIFFS Mount Error", "Web UI not found", "");
     delay(1500);
   }
 
@@ -3595,17 +3618,25 @@ void setup() {
   // 6. Sync NTP Clock (only if WiFi is connected)
   bootSyncTime();
 
-  // 7. Start Web Server, mDNS & Power On PZEM Sensor
+  // 7. Start Web Server & Power On PZEM Sensor
   drawBootScreen("STARTING SERVICES", "Server : Port 80", "AC Sensor  : ON", "Initializing...");
   setupWebServerRoutes();
-  // if (WiFi.status() == WL_CONNECTED) {
-  //   setupMDNS();
-  // }
 
   digitalWrite(PZEM_RELAY, LOW);  // Power ON PZEM sensor
-  delay(1500);                    // Allow PZEM-004T to stabilize
+  delay(2200);                    // Allow PZEM-004T MCU & zero-crossing ADC to stabilize
 
-  // 8. Initial PZEM Poll & Secondary ESP32 Handshake
+  // Flush any optocoupler power-on glitch bytes from Serial2 RX FIFO
+  while (Serial2.available()) {
+    Serial2.read();
+  }
+  // Discard one warmup read so the PZEM cache clears any power-on transient
+  (void)pzem.voltage();
+  delay(200);
+  while (Serial2.available()) {
+    Serial2.read();
+  }
+
+  // 8. Initial Clean PZEM Poll & Secondary ESP32 Handshake
   updatePzemReadings();
   espSerial.println("HELLO");
   shareDataWithSecondary();

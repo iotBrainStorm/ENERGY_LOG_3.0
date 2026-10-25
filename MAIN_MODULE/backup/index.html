@@ -42,6 +42,7 @@
       .modal-backdrop {
         opacity: 0;
         visibility: hidden;
+        pointer-events: none;
         overscroll-behavior: none;
         touch-action: none;
         transition:
@@ -51,14 +52,25 @@
       .modal-backdrop.show {
         opacity: 1;
         visibility: visible;
+        pointer-events: auto;
       }
       .modal-backdrop .modal-panel {
-        touch-action: auto;
+        touch-action: pan-y;
+        max-height: 92dvh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
         transform: scale(0.96) translateY(8px);
         transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       }
       .modal-backdrop.show .modal-panel {
         transform: scale(1) translateY(0);
+      }
+
+      /* Lock background page scrolling whenever any modal is open */
+      html.scroll-locked,
+      html.scroll-locked body {
+        overflow: hidden !important;
+        overscroll-behavior: none !important;
       }
 
       /* Power Button Active State */
@@ -1718,14 +1730,61 @@
         }
       });
 
+      // Lock background scroll whenever any modal (.modal-backdrop.show) is open
+      function syncModalScrollLock() {
+        const anyModalOpen =
+          document.querySelector(".modal-backdrop.show") !== null;
+        document.documentElement.classList.toggle(
+          "scroll-locked",
+          anyModalOpen,
+        );
+        document.body.classList.toggle("overflow-hidden", anyModalOpen);
+        document.documentElement.classList.toggle(
+          "overflow-hidden",
+          anyModalOpen,
+        );
+      }
+
       document.addEventListener("DOMContentLoaded", () => {
         updateSensorValues();
         setInterval(updateSensorValues, 1000);
+
         document
           .getElementById("admin-verify-pass")
           .addEventListener("keydown", (e) => {
             if (e.key === "Enter") confirmAdminVerify();
           });
+
+        // Automatically lock/unlock background scroll when any modal opens or closes
+        syncModalScrollLock();
+        const modalObserver = new MutationObserver(syncModalScrollLock);
+        document.querySelectorAll(".modal-backdrop").forEach((modalEl) => {
+          modalObserver.observe(modalEl, {
+            attributes: true,
+            attributeFilter: ["class"],
+          });
+        });
+
+        // Mobile touchmove guard: prevent touch-scroll pass-through on blurred backdrops
+        document.addEventListener(
+          "touchmove",
+          (e) => {
+            if (!document.documentElement.classList.contains("scroll-locked"))
+              return;
+
+            // Allow touch interaction on the Chart.js canvas for scrubbing tooltips
+            if (e.target.closest("#detail-chart")) return;
+
+            // Only allow vertical scrolling inside a modal-panel if its content actually overflows
+            const panel = e.target.closest(".modal-panel");
+            if (panel && panel.scrollHeight > panel.clientHeight) {
+              return;
+            }
+
+            e.preventDefault();
+          },
+          { passive: false },
+        );
       });
     </script>
   </body>
