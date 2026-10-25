@@ -71,8 +71,8 @@ The project is split across two microcontrollers communicating via a dedicated U
 - 1x **ST7920 128x64** Display (Primary UI)
 - 1x **16x2 I2C LCD** (Secondary UI)
 - 1x **Rotary Encoder** (with push-button)
-- 1x **74HC595** Shift Register IC
-- Relay Modules (2 for main/PZEM control, up to 16 for AFPC)
+- 2x **74HC595** Shift Register IC (For 16 chanel Relay Module)
+- Relay Modules (2 chanel for main output and PZEM control, 16 chanel for AFPC)
 - Active Buzzer, Push buttons, and LEDs
 
 ---
@@ -129,19 +129,20 @@ To compile this project, install the following libraries in your Arduino IDE or 
 1. **Flash the Primary ESP32:**
    - Open the Main `.ino` file.
    - **Crucial Step:** You _must_ upload the `index.html` and `config.html` files to the ESP32's SPIFFS storage. Use the "ESP32 Sketch Data Upload" tool in Arduino IDE, or PlatformIO's `Upload File System image` task.
+   - Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS).
    - Compile and upload the sketch.
 
 2. **Flash the Secondary ESP32:**
    - Open the Secondary `.ino` file.
-   - Compile and upload the sketch.
-
+   - Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS).
+   - Compile and upload the sketch
 3. **Initial Boot (Captive Portal):**
    - On first boot, the Main ESP32 will host a WiFi Access Point named **`EnergyLog`**.
    - Connect to this network. A captive portal will appear (or navigate to `192.168.4.1`).
    - Enter your local WiFi credentials. The ESP32 will reboot and connect to your network.
 
 4. **Accessing the Dashboard:**
-   - By default, navigate to **`http://energylog.local`** in your browser.
+   - By default, navigate to **`http://energylog.local`** or **`http://energylog-XXXX.local`** in your browser (where XXXX is last 4 chars of MAC).
    - Default Admin Login:
      - **Username:** `esp`
      - **Password:** `456456`
